@@ -271,6 +271,11 @@ function Parent() {
           </div>
         )}
       </section>
+
+      <p className="text-center font-body text-sm text-slate-400 pb-4">
+        <a href="/privacy" className="underline underline-offset-4">Privacy policy</a>
+        {" · "}All data stays on this device
+      </p>
     </main>
   );
 }

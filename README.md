@@ -55,7 +55,18 @@ create policy "anon upsert" on profiles_kids
   for all using (true) with check (true);
 ```
 
-> For production, replace the permissive policy with Supabase Auth and per-user RLS.
+> ⚠️ The policy above is for PROTOTYPING ONLY — it lets any anon key holder read/write all rows.
+> For production, use Supabase Auth and per-user row-level security instead:
+>
+> ```sql
+> -- production schema: rows owned by an authenticated user
+> alter table profiles_kids add column owner uuid references auth.users(id) default auth.uid();
+> drop policy "anon upsert" on profiles_kids;
+> create policy "own rows" on profiles_kids
+>   for all using (auth.uid() = owner) with check (auth.uid() = owner);
+> ```
+> …and sign users in (e.g. supabase.auth.signInAnonymously() per device, or magic-link email
+> for cross-device sync) before calling syncProfileToCloud.
 
 3. Copy `.env.example` → `.env.local` and fill in:
 
@@ -100,13 +111,17 @@ Notes:
 
 The app also ships a PWA manifest (`public/manifest.json`). Two lighter paths:
 
-1. **Installable PWA (zero extra work):** open the deployed URL in Chrome on Android → "Add to Home screen". Add `icon-192.png` / `icon-512.png` to `/public` for proper icons.
+1. **Installable PWA (zero extra work):** open the deployed URL in Chrome on Android → "Add to Home screen". Launcher icons are included (`/public/icon-*.png` and all Android `mipmap-*` densities + adaptive icon).
 2. **Play Store (TWA):** wrap the deployed URL with [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap):
    ```bash
    npm i -g @bubblewrap/cli
    bubblewrap init --manifest https://YOUR-URL/manifest.json
    bubblewrap build   # produces a signed .aab for the Play Console
    ```
+
+## Privacy
+
+`/privacy` serves a plain-language privacy policy (accurate to the current local-only data model). For Play Store Families review, use `https://YOUR-DOMAIN/privacy` as the privacy policy URL. **Update the page before enabling Supabase sync or adding any analytics.**
 
 ## Design system
 

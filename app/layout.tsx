@@ -26,6 +26,8 @@ export default function RootLayout({
       <head>
         {/* Fonts load at runtime with graceful system fallbacks,
             so offline builds and flaky networks never break the app. */}
+        <link rel="icon" href="/favicon.png" type="image/png" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"
