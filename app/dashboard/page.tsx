@@ -1,0 +1,131 @@
+"use client";
+
+import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
+import { ClientGate, TopBar } from "@/components/ui";
+import { useActiveProfile, useAppStore } from "@/store/useAppStore";
+import { playTap } from "@/lib/sounds";
+
+const ISLANDS = [
+  {
+    href: "/reading",
+    emoji: "📖",
+    label: "Reading Island",
+    sub: "Letters & words",
+    color: "bg-berry",
+    float: 0,
+  },
+  {
+    href: "/math",
+    emoji: "🔢",
+    label: "Math Mountain",
+    sub: "Count & solve",
+    color: "bg-sky-kid",
+    float: 0.4,
+  },
+  {
+    href: "/logic",
+    emoji: "🧩",
+    label: "Logic Lagoon",
+    sub: "Sort & think",
+    color: "bg-grass",
+    float: 0.8,
+  },
+  {
+    href: "/art",
+    emoji: "🎨",
+    label: "Art Cove",
+    sub: "Draw & create",
+    color: "bg-tangerine",
+    float: 1.2,
+  },
+] as const;
+
+export default function DashboardPage() {
+  return (
+    <ClientGate>
+      <Dashboard />
+    </ClientGate>
+  );
+}
+
+function Dashboard() {
+  const router = useRouter();
+  const profile = useActiveProfile()!;
+  const soundOn = useAppStore((s) => s.soundOn);
+  const setActiveProfile = useAppStore((s) => s.setActiveProfile);
+
+  return (
+    <main className="min-h-dvh bg-sky-scene flex flex-col">
+      <TopBar title={`Hi, ${profile.name}!`} emoji={profile.avatar} />
+
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-5 pb-6">
+        <div className="grid grid-cols-2 gap-4 sm:gap-6 w-full max-w-2xl">
+          {ISLANDS.map((isle, i) => (
+            <motion.button
+              key={isle.href}
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: [0, -8, 0] }}
+              transition={{
+                opacity: { delay: i * 0.1 },
+                y: {
+                  delay: isle.float,
+                  repeat: Infinity,
+                  duration: 3.4,
+                  ease: "easeInOut",
+                },
+              }}
+              whileHover={{ scale: 1.06 }}
+              whileTap={{ scale: 0.92 }}
+              onClick={() => {
+                playTap(soundOn);
+                router.push(isle.href);
+              }}
+              aria-label={isle.label}
+              className={`${isle.color} rounded-[2.5rem] shadow-chunky p-6 sm:p-8
+                flex flex-col items-center gap-2 min-h-[160px] sm:min-h-[200px]`}
+            >
+              <span className="text-6xl sm:text-7xl" aria-hidden>{isle.emoji}</span>
+              <span className="font-display text-xl sm:text-2xl text-white drop-shadow">
+                {isle.label}
+              </span>
+              <span className="font-body text-white/80 text-sm">{isle.sub}</span>
+            </motion.button>
+          ))}
+        </div>
+
+        {/* The Suitcase — sticker collection */}
+        <motion.button
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          whileHover={{ scale: 1.05, rotate: -1 }}
+          whileTap={{ scale: 0.93 }}
+          onClick={() => {
+            playTap(soundOn);
+            router.push("/stickers");
+          }}
+          aria-label="Open your sticker suitcase"
+          className="bg-grape rounded-[2rem] shadow-chunky px-8 py-4 flex items-center gap-3 text-white"
+        >
+          <span className="text-4xl" aria-hidden>🧳</span>
+          <span className="font-display text-2xl">My Suitcase</span>
+          <span className="bg-white/25 rounded-full px-3 py-1 font-display">
+            {profile.stickers.length}
+          </span>
+        </motion.button>
+
+        <button
+          onClick={() => {
+            setActiveProfile(null);
+            router.push("/");
+          }}
+          className="font-body text-slate-400 underline underline-offset-4 py-2"
+          aria-label="Switch player"
+        >
+          🔄 Switch player
+        </button>
+      </div>
+    </main>
+  );
+}

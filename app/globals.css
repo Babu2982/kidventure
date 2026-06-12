@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sky: #4fc3f7;
+  --sun: #ffd54f;
+  --grass: #81c784;
+  --berry: #f06292;
+  --grape: #9575cd;
+}
+
+html, body { height: 100%; -webkit-tap-highlight-color: transparent; }
+
+.bg-sky-scene {
+  background: linear-gradient(180deg, #b3e5fc 0%, #e1f5fe 55%, #fff8e7 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+button:focus-visible, a:focus-visible {
+  outline: 4px solid #f06292;
+  outline-offset: 3px;
+  border-radius: 1rem;
+}
