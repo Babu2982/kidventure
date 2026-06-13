@@ -119,6 +119,13 @@ The app also ships a PWA manifest (`public/manifest.json`). Two lighter paths:
    bubblewrap build   # produces a signed .aab for the Play Console
    ```
 
+## Voice & narration engines (v6)
+
+- **Narration** (`lib/narrator.ts`): auto-reads module instructions on load, every IGCSE word problem, and spoken corrective explanations on mistakes (e.g. abacus bead hints). Toggle: 🗣️ in the TopBar or Parent Dashboard. Languages: en-US / hi-IN / kn-IN / ta-IN via the device TTS engine.
+- **Voice answers** (`lib/voice.ts` + `components/Voice.tsx`): a single `listenOnce()` API backed by **@capacitor-community/speech-recognition on Android** (the Web Speech Recognition API does not exist in Android WebView) and webkitSpeechRecognition on the web. Math accepts spoken numbers ("twelve", homophones like "for"→4); Reading's "Say it with me" validates pronunciation by Levenshtein similarity (threshold 0.65). Mic buttons hide automatically on unsupported platforms (e.g. Firefox).
+- **Adaptive difficulty** (`recordAnswer` in the store): per-profile matrix (correctStreak, averageTimePerAnswer, currentSkillCeiling 1–3, rolling 5-answer window). 5-streak → level up + celebratory narration; accuracy <60% over 5 → gentle step down. Drives count ranges, abacus targets (+30s timer at L3), word-problem complexity, sort-set size, pattern pools, and rhythm tempo. Visible in Parent Dashboard.
+- **Android permissions**: `RECORD_AUDIO` + the `RecognitionService` query are already in `AndroidManifest.xml`. Android shows the mic permission prompt on first voice use.
+
 ## Privacy
 
 `/privacy` serves a plain-language privacy policy (accurate to the current local-only data model). For Play Store Families review, use `https://YOUR-DOMAIN/privacy` as the privacy policy URL. **Update the page before enabling Supabase sync or adding any analytics.**

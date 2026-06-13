@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ClientGate, TopBar, BigButton } from "@/components/ui";
 import { RewardOverlay } from "@/components/RewardOverlay";
-import { useAppStore, useLearningMode, type Sticker } from "@/store/useAppStore";
+import { useAppStore, useLearningMode, useSkillLevel, type Sticker } from "@/store/useAppStore";
+import { useAutoNarrate, narrateMistake, narrateCelebration, MODULE_INTROS } from "@/lib/narrator";
+import { useRef } from "react";
 import { playSuccess, playRetry, playTap } from "@/lib/sounds";
 import { RhythmMatcher, OlympiadPatterns } from "@/components/AdvancedLogic";
 
@@ -34,9 +36,12 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function makePuzzle(): Item[] {
+/** Adaptive: L1 sorts 4 items, L2 sorts 5, L3 sorts 6. */
+function makePuzzle(level: number): Item[] {
   const emoji = THINGS[Math.floor(Math.random() * THINGS.length)];
-  const sizes = shuffle([2.2, 3.2, 4.4, 5.8]).slice(0, 4);
+  const all = [1.6, 2.2, 2.8, 3.6, 4.6, 5.8];
+  const n = level >= 3 ? 6 : level === 2 ? 5 : 4;
+  const sizes = shuffle(all).slice(0, n);
   return shuffle(sizes.map((size, id) => ({ id, emoji, size })));
 }
 
@@ -58,6 +63,7 @@ function LogicRouter() {
 function AdvancedLogic() {
   const soundOn = useAppStore((s) => s.soundOn);
   const [tab, setTab] = useState<"rhythm" | "patterns">("rhythm");
+  useAutoNarrate(tab === "rhythm" ? MODULE_INTROS.logicRhythm : MODULE_INTROS.logicPatterns);
   return (
     <main className="min-h-dvh bg-sky-scene flex flex-col">
       <TopBar title="Logic Lagoon" emoji="🧠" />
@@ -86,8 +92,11 @@ function AdvancedLogic() {
 
 function SizeSort() {
   const router = useRouter();
-  const { soundOn, awardStarAndSticker } = useAppStore();
-  const [items, setItems] = useState<Item[]>(makePuzzle);
+  const { soundOn, awardStarAndSticker, recordAnswer } = useAppStore();
+  const level = useSkillLevel();
+  const puzzleStart = useRef(Date.now());
+  useAutoNarrate(MODULE_INTROS.logicJunior);
+  const [items, setItems] = useState<Item[]>(() => makePuzzle(1));
   const [placed, setPlaced] = useState<Item[]>([]);
   const [puzzlesDone, setPuzzlesDone] = useState(0);
   const [shakeId, setShakeId] = useState<number | null>(null);
@@ -106,6 +115,9 @@ function SizeSort() {
       setPlaced(newPlaced);
       playSuccess(soundOn);
       if (newPlaced.length === items.length) {
+        const { levelChange, newLevel } = recordAnswer(true, Date.now() - puzzleStart.current);
+        if (levelChange === 1)
+          narrateCelebration(`Brilliant sorting! Level ${newLevel} — more things to line up now!`);
         confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
         const done = puzzlesDone + 1;
         setTimeout(() => {
@@ -114,13 +126,17 @@ function SizeSort() {
             setPuzzlesDone(0);
           } else {
             setPuzzlesDone(done);
-            setItems(makePuzzle());
+            setItems(makePuzzle(level));
             setPlaced([]);
+            puzzleStart.current = Date.now();
           }
         }, 1000);
       }
     } else {
-      playRetry(soundOn);
+      recordAnswer(false, Date.now() - puzzleStart.current);
+      narrateMistake(
+        "Hmm, look carefully — which one is the very smallest left over? That one goes next!"
+      );
       setShakeId(item.id);
       setTimeout(() => setShakeId(null), 500);
     }
@@ -128,9 +144,10 @@ function SizeSort() {
 
   const restart = () => {
     setReward(null);
-    setItems(makePuzzle());
+    setItems(makePuzzle(level));
     setPlaced([]);
     setPuzzlesDone(0);
+    puzzleStart.current = Date.now();
   };
 
   return (

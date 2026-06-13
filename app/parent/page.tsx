@@ -30,8 +30,10 @@ function Parent() {
     deleteProfile,
     soundOn,
     musicOn,
+    narrationOn,
     toggleSound,
     toggleMusic,
+    toggleNarration,
     unlockParentGate,
     isParentUnlocked,
   } = useAppStore();
@@ -139,6 +141,13 @@ function Parent() {
           >
             {musicOn ? "🎵 Music: On" : "🎵 Music: Off"}
           </BigButton>
+          <BigButton
+            color={narrationOn ? "bg-sky-kid" : "bg-slate-200"}
+            className="!text-lg"
+            onClick={toggleNarration}
+          >
+            {narrationOn ? "🗣️ Voice guide: On" : "🗣️ Voice guide: Off"}
+          </BigButton>
         </div>
       </section>
 
@@ -196,6 +205,38 @@ function Parent() {
                 <div className="mt-3 bg-slate-50 rounded-xl p-3 flex items-center justify-between flex-wrap gap-2">
                   <span className="font-body text-slate-500 text-sm">Learning mode</span>
                   <ModeToggle profile={p} />
+                </div>
+
+                {/* Adaptive difficulty engine — live performance matrix */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+                  <div className="bg-sky-kid/15 rounded-xl p-2 text-center">
+                    <p className="font-body text-xs text-slate-500">🧠 Skill level</p>
+                    <p className="font-display text-lg text-slate-700">
+                      {p.performance?.currentSkillCeiling ?? 1} / 3
+                    </p>
+                  </div>
+                  <div className="bg-sky-kid/15 rounded-xl p-2 text-center">
+                    <p className="font-body text-xs text-slate-500">🔥 Streak</p>
+                    <p className="font-display text-lg text-slate-700">
+                      {p.performance?.correctStreak ?? 0}
+                    </p>
+                  </div>
+                  <div className="bg-sky-kid/15 rounded-xl p-2 text-center">
+                    <p className="font-body text-xs text-slate-500">🎯 Accuracy</p>
+                    <p className="font-display text-lg text-slate-700">
+                      {p.performance?.totalAnswers
+                        ? Math.round((p.performance.totalCorrect / p.performance.totalAnswers) * 100) + "%"
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="bg-sky-kid/15 rounded-xl p-2 text-center">
+                    <p className="font-body text-xs text-slate-500">⏱️ Avg answer</p>
+                    <p className="font-display text-lg text-slate-700">
+                      {p.performance?.averageTimePerAnswer
+                        ? (p.performance.averageTimePerAnswer / 1000).toFixed(1) + "s"
+                        : "—"}
+                    </p>
+                  </div>
                 </div>
 
                 {p.learningMode === "advanced" && (

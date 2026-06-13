@@ -3,7 +3,8 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import confetti from "canvas-confetti";
-import { useGameStore, type Sticker } from "@/store/useGameStore";
+import { useGameStore, useSkillLevel, type Sticker } from "@/store/useGameStore";
+import { narrateMistake, narrateCelebration } from "@/lib/narrator";
 import { playTap, playSuccess, playRetry } from "@/lib/sounds";
 import { BigButton } from "@/components/ui";
 import { RewardOverlay } from "@/components/RewardOverlay";
@@ -16,7 +17,7 @@ import { useRouter } from "next/navigation";
    Accuracy = |tap time − nearest beat time| via performance.now().
    ==================================================================== */
 
-const BEAT_MS = 800;          // 75 BPM — gentle for small hands
+const BEAT_MS_BY_LEVEL: Record<number, number> = { 1: 800, 2: 700, 3: 600 };
 const BEATS_PER_CYCLE = 4;
 const CYCLES_PER_ROUND = 4;   // 16 taps per round
 const GOOD_WINDOW = 220;      // ms tolerance for a "hit"
@@ -28,6 +29,8 @@ const BOLS = ["தை", "யா", "தை", "ஹி"]; // tai-ya-tai-hi style sy
 export function RhythmMatcher() {
   const router = useRouter();
   const { soundOn, awardStarAndSticker } = useGameStore();
+  const skill = useSkillLevel();
+  const BEAT_MS = BEAT_MS_BY_LEVEL[Math.min(3, Math.max(1, skill))];
   const [running, setRunning] = useState(false);
   const [beat, setBeat] = useState(-1); // 0..3 currently flashing
   const [taps, setTaps] = useState<Array<"perfect" | "good" | "miss">>([]);
@@ -186,13 +189,24 @@ export function RhythmMatcher() {
    ==================================================================== */
 
 const SPORT_EMOJIS = ["🛼", "🏸", "🥽", "🏊", "🥋", "⛸️"];
-const PATTERNS = [
-  ["A", "B", "A", "B", "A", "B"],
-  ["A", "A", "B", "A", "A", "B"],
-  ["A", "B", "B", "A", "B", "B"],
-  ["A", "B", "B", "A", "A", "B", "B", "A"], // ABBA repeated
-  ["A", "B", "C", "A", "B", "C"],
-];
+/** IGCSE G1 progression: L1 simple alternation, L2 grouped repeats,
+    L3 complex matrix sequences (A-B-B-A, A-B-C-A). */
+const PATTERNS_BY_LEVEL: Record<number, string[][]> = {
+  1: [
+    ["A", "B", "A", "B", "A", "B"],
+    ["A", "A", "B", "A", "A", "B"],
+  ],
+  2: [
+    ["A", "B", "B", "A", "B", "B"],
+    ["A", "A", "B", "B", "A", "A", "B", "B"],
+    ["A", "B", "C", "A", "B", "C"],
+  ],
+  3: [
+    ["A", "B", "B", "A", "A", "B", "B", "A"],
+    ["A", "B", "C", "A", "A", "B", "C", "A"],
+    ["A", "B", "C", "C", "B", "A", "A", "B", "C"],
+  ],
+};
 const PUZZLES_TO_WIN = 4;
 
 function shuffle<T>(arr: T[]): T[] {
@@ -210,8 +224,9 @@ interface PatternPuzzle {
   options: string[];
 }
 
-function makePatternPuzzle(): PatternPuzzle {
-  const pattern = PATTERNS[Math.floor(Math.random() * PATTERNS.length)];
+function makePatternPuzzle(level = 1): PatternPuzzle {
+  const pool = PATTERNS_BY_LEVEL[Math.min(3, Math.max(1, level))];
+  const pattern = pool[Math.floor(Math.random() * pool.length)];
   const symbols = shuffle(SPORT_EMOJIS);
   const map: Record<string, string> = { A: symbols[0], B: symbols[1], C: symbols[2] };
   const seq = pattern.map((k) => map[k]);
@@ -223,8 +238,10 @@ function makePatternPuzzle(): PatternPuzzle {
 
 export function OlympiadPatterns() {
   const router = useRouter();
-  const { soundOn, awardStarAndSticker } = useGameStore();
-  const [puzzle, setPuzzle] = useState<PatternPuzzle>(() => makePatternPuzzle());
+  const { soundOn, awardStarAndSticker, recordAnswer } = useGameStore();
+  const level = useSkillLevel();
+  const startRef = useState(() => ({ t: Date.now() }))[0];
+  const [puzzle, setPuzzle] = useState<PatternPuzzle>(() => makePatternPuzzle(1));
   const [solved, setSolved] = useState(0);
   const [feedback, setFeedback] = useState<"none" | "right" | "wrong">("none");
   const [locked, setLocked] = useState(false);
@@ -232,7 +249,11 @@ export function OlympiadPatterns() {
 
   const answer = (e: string) => {
     if (locked) return;
+    const elapsed = Date.now() - startRef.t;
     if (e === puzzle.answer) {
+      const { levelChange, newLevel } = recordAnswer(true, elapsed);
+      if (levelChange === 1)
+        narrateCelebration(`Pattern master! Level ${newLevel} unlocked — longer, trickier patterns coming!`);
       setLocked(true);
       setFeedback("right");
       playSuccess(soundOn);
@@ -245,13 +266,17 @@ export function OlympiadPatterns() {
         } else {
           setSolved(done);
         }
-        setPuzzle(makePatternPuzzle());
+        setPuzzle(makePatternPuzzle(level));
         setFeedback("none");
         setLocked(false);
+        startRef.t = Date.now();
       }, 1000);
     } else {
+      recordAnswer(false, elapsed);
+      narrateMistake(
+        "Let's read the pattern together from the start, out loud. What repeats? Then pick what comes next."
+      );
       setFeedback("wrong");
-      playRetry(soundOn);
       setTimeout(() => setFeedback("none"), 900);
     }
   };

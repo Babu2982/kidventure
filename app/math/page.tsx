@@ -6,7 +6,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { ClientGate, TopBar, BigButton } from "@/components/ui";
 import { RewardOverlay } from "@/components/RewardOverlay";
-import { useAppStore, useLearningMode, type Sticker } from "@/store/useAppStore";
+import { useAppStore, useLearningMode, useSkillLevel, type Sticker } from "@/store/useAppStore";
+import { useAutoNarrate, narrate, narrateMistake, narrateCelebration, MODULE_INTROS } from "@/lib/narrator";
+import { SpeakButton, MicButton } from "@/components/Voice";
+import { numberFromSpeech } from "@/lib/voice";
+import { useRef } from "react";
 import { playSuccess, playRetry, playTap } from "@/lib/sounds";
 import { VirtualAbacus } from "@/components/VirtualAbacus";
 import { OlympiadGenerator } from "@/components/OlympiadGenerator";
@@ -29,10 +33,16 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function makeRound(): Round {
-  const count = 1 + Math.floor(Math.random() * 5);
+/** Adaptive ranges (IGCSE G1 progression):
+    L1 counts 1–5 · L2 counts 1–10 · L3 counts 6–12. */
+function makeRound(level: number): Round {
+  const lo = level >= 3 ? 6 : 1;
+  const hi = level >= 3 ? 12 : level === 2 ? 10 : 5;
+  const count = lo + Math.floor(Math.random() * (hi - lo + 1));
   const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
-  const wrongs = shuffle([1, 2, 3, 4, 5].filter((n) => n !== count)).slice(0, 2);
+  const pool = [];
+  for (let n = Math.max(1, count - 3); n <= count + 3; n++) if (n !== count) pool.push(n);
+  const wrongs = shuffle(pool).slice(0, 2);
   return { animal, count, options: shuffle([count, ...wrongs]) };
 }
 
@@ -54,6 +64,7 @@ function MathRouter() {
 function AdvancedMath() {
   const soundOn = useAppStore((s) => s.soundOn);
   const [tab, setTab] = useState<"abacus" | "olympiad">("abacus");
+  useAutoNarrate(tab === "abacus" ? MODULE_INTROS.mathAbacus : MODULE_INTROS.mathOlympiad);
   return (
     <main className="min-h-dvh bg-sky-scene flex flex-col">
       <TopBar title="Math Mountain" emoji="🧮" />
@@ -82,22 +93,32 @@ function AdvancedMath() {
 
 function CountGame() {
   const router = useRouter();
-  const { soundOn, awardStarAndSticker } = useAppStore();
-  const [round, setRound] = useState<Round>(makeRound);
+  const { soundOn, awardStarAndSticker, recordAnswer } = useAppStore();
+  const level = useSkillLevel();
+  const roundStart = useRef(Date.now());
+  useAutoNarrate(MODULE_INTROS.mathJunior);
+  const [round, setRound] = useState<Round>(() => makeRound(1));
   const [progress, setProgress] = useState(0);
   const [feedback, setFeedback] = useState<"none" | "wrong" | "right">("none");
   const [reward, setReward] = useState<Sticker | null>(null);
   const [locked, setLocked] = useState(false);
 
-  const next = useCallback(() => {
-    setRound(makeRound());
+  const next = useCallback((lvl: number) => {
+    setRound(makeRound(lvl));
     setFeedback("none");
     setLocked(false);
+    roundStart.current = Date.now();
   }, []);
 
   const answer = (n: number) => {
     if (locked) return;
+    const elapsed = Date.now() - roundStart.current;
     if (n === round.count) {
+      const { levelChange, newLevel } = recordAnswer(true, elapsed);
+      if (levelChange === 1)
+        narrateCelebration(`Amazing! You leveled up to level ${newLevel}! The numbers get a little bigger now.`);
+      else if (levelChange === -1)
+        narrateCelebration("Let's practice with smaller numbers for a bit. You're doing great!");
       setLocked(true);
       setFeedback("right");
       playSuccess(soundOn);
@@ -114,20 +135,33 @@ function CountGame() {
           setProgress(0);
         } else {
           setProgress(newProgress);
-          next();
+          next(level);
         }
       }, 900);
     } else {
+      recordAnswer(false, elapsed);
       setFeedback("wrong");
-      playRetry(soundOn);
+      narrateMistake(
+        `Not quite. Touch each ${"animal"} with your finger and count out loud: one, two, three... then pick that number!`
+      );
       setTimeout(() => setFeedback("none"), 900);
     }
+  };
+
+  const onVoice = (t: string) => {
+    const n = numberFromSpeech(t);
+    if (n === null) {
+      narrate("I didn't catch a number. Try saying it like: four!");
+      return;
+    }
+    if (round.options.includes(n)) answer(n);
+    else narrate(`I heard ${n}, but that's not one of the choices. Look at the buttons and try again!`);
   };
 
   const restart = () => {
     setReward(null);
     setProgress(0);
-    next();
+    next(level);
   };
 
   return (
@@ -147,9 +181,12 @@ function CountGame() {
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-5 pb-8">
-        <h2 className="font-display text-2xl sm:text-3xl text-slate-700 text-center">
-          How many do you see? 👀
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="font-display text-2xl sm:text-3xl text-slate-700 text-center">
+            How many do you see? 👀
+          </h2>
+          <SpeakButton text="How many animals do you see? Count them and tap the right number!" />
+        </div>
 
         <motion.div
           key={`${round.animal}-${round.count}-${progress}`}
@@ -194,6 +231,8 @@ function CountGame() {
             </BigButton>
           ))}
         </div>
+
+        <MicButton onTranscript={onVoice} prompt="Or say the number!" />
 
         <AnimatePresence>
           {feedback === "wrong" && (

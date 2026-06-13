@@ -7,11 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "build:android": "BUILD_TARGET=capacitor next build && npx cap sync android",
+    "build:android": "cross-env BUILD_TARGET=capacitor next build && npx cap sync android",
     "android:open": "npx cap open android",
-    "android:run": "npx cap run android"
+    "android:run": "npx cap run android",
+    "deploy:web": "git add -A && git commit -m deploy && git push",
+    "deploy:android": "npm run build:android && npx cap open android"
   },
   "dependencies": {
+    "@capacitor-community/speech-recognition": "^6.0.1",
     "@capacitor/android": "^6.2.1",
     "@capacitor/core": "^6.2.1",
     "@supabase/supabase-js": "^2.45.0",
@@ -28,6 +31,7 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "autoprefixer": "^10.4.19",
+    "cross-env": "^10.1.0",
     "postcss": "^8.4.39",
     "tailwindcss": "^3.4.6",
     "typescript": "^5"

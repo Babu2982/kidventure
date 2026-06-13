@@ -41,6 +41,16 @@ export interface SportsLogEntry {
   loggedAt: number;
 }
 
+export interface PerformanceStats {
+  correctStreak: number;
+  totalAnswers: number;
+  totalCorrect: number;
+  totalTimeMs: number;
+  averageTimePerAnswer: number; // ms
+  currentSkillCeiling: number;  // 1 (baseline) | 2 (intermediate) | 3 (olympiad)
+  recentResults: boolean[];     // rolling window of the last 5 answers
+}
+
 export interface AdvancedMetrics {
   currentHindiLevel: number;   // index into the Hindi varnamala track
   currentKannadaLevel: number; // index into the Kannada aksharamale track
@@ -62,6 +72,8 @@ export interface ChildProfile {
   /* ---- v2 ---- */
   learningMode: LearningMode;
   advancedMetrics: AdvancedMetrics;
+  /* ---- v3: adaptive difficulty ---- */
+  performance: PerformanceStats;
 }
 
 interface GameState {
@@ -69,6 +81,7 @@ interface GameState {
   activeProfileId: string | null;
   soundOn: boolean;
   musicOn: boolean;
+  narrationOn: boolean;
   parentUnlockedUntil: number;
 
   /* profile lifecycle */
@@ -88,9 +101,16 @@ interface GameState {
   ) => void;
   logSportsActivity: (sport: SportType, minutes: number, note?: string) => void;
 
+  /* v3: adaptive difficulty */
+  recordAnswer: (correct: boolean, timeMs: number) => {
+    levelChange: -1 | 0 | 1;
+    newLevel: number;
+  };
+
   /* settings & gate */
   toggleSound: () => void;
   toggleMusic: () => void;
+  toggleNarration: () => void;
   unlockParentGate: () => void;
   isParentUnlocked: () => boolean;
 }
@@ -136,6 +156,16 @@ const SPORTS_STICKER_POOL: Array<{ emoji: string; name: string }> = [
 const uid = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+export const defaultPerformance = (): PerformanceStats => ({
+  correctStreak: 0,
+  totalAnswers: 0,
+  totalCorrect: 0,
+  totalTimeMs: 0,
+  averageTimePerAnswer: 0,
+  currentSkillCeiling: 1,
+  recentResults: [],
+});
+
 export const defaultAdvancedMetrics = (): AdvancedMetrics => ({
   currentHindiLevel: 0,
   currentKannadaLevel: 0,
@@ -162,6 +192,11 @@ function normalizeProfile(p: any): ChildProfile {
       ...(p.advancedMetrics ?? {}),
       sportsLog: p.advancedMetrics?.sportsLog ?? [],
     },
+    performance: {
+      ...defaultPerformance(),
+      ...(p.performance ?? {}),
+      recentResults: (p.performance?.recentResults ?? []).slice(-5),
+    },
   };
 }
 
@@ -174,6 +209,7 @@ export const useGameStore = create<GameState>()(
       activeProfileId: null,
       soundOn: true,
       musicOn: false,
+      narrationOn: true,
       parentUnlockedUntil: 0,
 
       addProfile: (name, age, avatar) => {
@@ -279,8 +315,65 @@ export const useGameStore = create<GameState>()(
           }),
         })),
 
+      /* ---- v3: adaptive difficulty engine ----
+         Streak of 5 correct  -> level up (max 3), streak resets.
+         Accuracy < 60% over the last 5 answers -> gentle step back
+         down (min 1) and the window clears so confidence can rebuild
+         at the easier level before another adjustment. */
+      recordAnswer: (correct, timeMs) => {
+        let levelChange: -1 | 0 | 1 = 0;
+        let newLevel = 1;
+        set((s) => ({
+          profiles: s.profiles.map((p) => {
+            if (p.id !== s.activeProfileId) return p;
+            const perf = p.performance ?? defaultPerformance();
+            const totalAnswers = perf.totalAnswers + 1;
+            const totalCorrect = perf.totalCorrect + (correct ? 1 : 0);
+            const totalTimeMs =
+              perf.totalTimeMs + Math.max(0, Math.min(120000, timeMs));
+            let correctStreak = correct ? perf.correctStreak + 1 : 0;
+            let recentResults = [...perf.recentResults, correct].slice(-5);
+            let currentSkillCeiling = perf.currentSkillCeiling;
+
+            if (correctStreak >= 5 && currentSkillCeiling < 3) {
+              currentSkillCeiling += 1;
+              correctStreak = 0;
+              recentResults = [];
+              levelChange = 1;
+            } else if (
+              recentResults.length === 5 &&
+              recentResults.filter(Boolean).length / 5 < 0.6 &&
+              currentSkillCeiling > 1
+            ) {
+              currentSkillCeiling -= 1;
+              correctStreak = 0;
+              recentResults = [];
+              levelChange = -1;
+            }
+            newLevel = currentSkillCeiling;
+
+            const updated: ChildProfile = {
+              ...p,
+              performance: {
+                correctStreak,
+                totalAnswers,
+                totalCorrect,
+                totalTimeMs,
+                averageTimePerAnswer: Math.round(totalTimeMs / totalAnswers),
+                currentSkillCeiling,
+                recentResults,
+              },
+            };
+            syncProfileToCloud(updated);
+            return updated;
+          }),
+        }));
+        return { levelChange, newLevel };
+      },
+
       toggleSound: () => set((s) => ({ soundOn: !s.soundOn })),
       toggleMusic: () => set((s) => ({ musicOn: !s.musicOn })),
+      toggleNarration: () => set((s) => ({ narrationOn: !s.narrationOn })),
 
       unlockParentGate: () =>
         set({ parentUnlockedUntil: Date.now() + 5 * 60 * 1000 }),
@@ -288,13 +381,14 @@ export const useGameStore = create<GameState>()(
     }),
     {
       name: "kidsacademy-v1", // unchanged key so existing data migrates in place
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         profiles: s.profiles,
         activeProfileId: s.activeProfileId,
         soundOn: s.soundOn,
         musicOn: s.musicOn,
+        narrationOn: s.narrationOn,
       }),
       /** v1 → v2: add learningMode + advancedMetrics to saved profiles. */
       migrate: (persisted: any) => {
@@ -322,6 +416,14 @@ export const useLearningMode = (): LearningMode =>
     (s) =>
       s.profiles.find((p) => p.id === s.activeProfileId)?.learningMode ??
       "junior"
+  );
+
+/** Current child's adaptive skill level (1 when no profile). */
+export const useSkillLevel = (): number =>
+  useGameStore(
+    (s) =>
+      s.profiles.find((p) => p.id === s.activeProfileId)?.performance
+        ?.currentSkillCeiling ?? 1
   );
 
 /* Back-compat alias so old call sites can keep using useAppStore. */

@@ -6,6 +6,9 @@ import { useGameStore, type Sticker } from "@/store/useGameStore";
 import { speak, stopSpeaking, warmVoices, ttsSupported } from "@/lib/tts";
 import { playTap } from "@/lib/sounds";
 import { BigButton } from "@/components/ui";
+import { MicButton } from "@/components/Voice";
+import { similarity } from "@/lib/voice";
+import { narrate } from "@/lib/narrator";
 import { RewardOverlay } from "@/components/RewardOverlay";
 import { useRouter } from "next/navigation";
 
@@ -18,18 +21,23 @@ const STORIES = [
     title: "The Swimming Star",
     emoji: "🏊",
     text: "Meera loves to swim every morning. She jumps into the cool blue pool and counts her laps. One lap, two laps, three laps! Her coach claps and says, well done, little fish. Meera smiles and dreams of winning a shiny gold medal one day.",
+    practice: ["swim", "pool", "coach", "gold medal", "morning"],
   },
   {
     title: "The Brave Shuttle",
     emoji: "🏸",
     text: "A small white shuttle flew high over the net. Arjun ran fast and swung his racket with all his might. Smash! The shuttle zoomed across the court like a rocket. Everyone cheered for the brave little shuttle and the happy boy who hit it.",
+    practice: ["shuttle", "racket", "rocket", "brave", "cheered"],
   },
   {
     title: "Roller Skate Race",
     emoji: "🛼",
     text: "Diya put on her red roller skates and her shiny helmet. The park path was long and bumpy, but she did not give up. Round and round she rolled, faster and faster. At the finish line, her friends shouted hip hip hooray!",
+    practice: ["skates", "helmet", "bumpy", "faster", "hooray"],
   },
 ];
+
+const MATCH_THRESHOLD = 0.65; // forgiving for young voices
 
 export function StoryReader() {
   const router = useRouter();
@@ -40,6 +48,10 @@ export function StoryReader() {
   const [finished, setFinished] = useState(false);
   const [reward, setReward] = useState<Sticker | null>(null);
   const cancelRef = useRef<() => void>(() => {});
+
+  /* "Say it with me" pronunciation practice */
+  const [practiceIdx, setPracticeIdx] = useState<number | null>(null);
+  const [practiceResult, setPracticeResult] = useState<Record<number, boolean>>({});
 
   const story = STORIES[storyIdx];
 
@@ -85,6 +97,25 @@ export function StoryReader() {
 
   const collect = () => setReward(awardStarAndSticker("reading"));
 
+  const startPractice = (i: number) => {
+    setPracticeIdx(i);
+    // speak the word, then the child repeats into the mic
+    speak(story.practice[i], { lang: "en-US", rate: 0.7 });
+  };
+
+  const onPracticeVoice = (transcript: string) => {
+    if (practiceIdx === null) return;
+    const target = story.practice[practiceIdx];
+    // web backend may return alternatives joined by " | " — take the best
+    const best = Math.max(
+      ...transcript.split(" | ").map((alt) => similarity(alt, target))
+    );
+    const ok = best >= MATCH_THRESHOLD;
+    setPracticeResult((r) => ({ ...r, [practiceIdx]: ok }));
+    if (ok) narrate(`Wonderful! You said ${target} beautifully!`);
+    else narrate(`Almost! Listen once more: ${target}. Then tap the microphone and try again.`);
+  };
+
   return (
     <section className="flex flex-col items-center gap-4 w-full max-w-xl">
       {/* story picker */}
@@ -92,7 +123,7 @@ export function StoryReader() {
         {STORIES.map((s, i) => (
           <button
             key={s.title}
-            onClick={() => { stop(); setStoryIdx(i); setFinished(false); playTap(soundOn); }}
+            onClick={() => { stop(); setStoryIdx(i); setFinished(false); setPracticeIdx(null); setPracticeResult({}); playTap(soundOn); }}
             aria-pressed={i === storyIdx}
             className={`font-display rounded-2xl px-4 py-2 shadow-chunkySm transition
               ${i === storyIdx ? "bg-berry text-white scale-105" : "bg-white text-slate-600"}`}
@@ -126,6 +157,36 @@ export function StoryReader() {
           })}
         </p>
       </motion.div>
+
+      {/* Say it with me — speak each key word, child repeats */}
+      <div className="bg-white/80 rounded-[2rem] shadow-chunkySm p-4 w-full">
+        <p className="font-display text-lg text-slate-700 text-center mb-2">
+          🎤 Say it with me!
+        </p>
+        <div className="flex flex-wrap justify-center gap-2 mb-3">
+          {story.practice.map((w, i) => (
+            <button
+              key={w}
+              onClick={() => startPractice(i)}
+              aria-pressed={practiceIdx === i}
+              className={`font-display rounded-2xl px-4 py-2 shadow-chunkySm transition
+                ${practiceResult[i] ? "bg-grass text-white" :
+                  practiceIdx === i ? "bg-sun scale-105" : "bg-cream text-slate-600"}`}
+            >
+              {practiceResult[i] ? "✅ " : ""}{w}
+            </button>
+          ))}
+        </div>
+        {practiceIdx !== null && (
+          <div className="flex justify-center">
+            <MicButton
+              lang="en-US"
+              onTranscript={onPracticeVoice}
+              prompt={`Say: “${story.practice[practiceIdx]}”`}
+            />
+          </div>
+        )}
+      </div>
 
       {!ttsSupported() && (
         <p className="font-body text-sm text-slate-400">

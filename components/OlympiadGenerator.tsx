@@ -3,7 +3,11 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
 import confetti from "canvas-confetti";
-import { useGameStore, type Sticker } from "@/store/useGameStore";
+import { useGameStore, useSkillLevel, type Sticker } from "@/store/useGameStore";
+import { useAutoNarrate, narrate, narrateMistake, narrateCelebration } from "@/lib/narrator";
+import { SpeakButton, MicButton } from "@/components/Voice";
+import { numberFromSpeech } from "@/lib/voice";
+import { useRef } from "react";
 import { playSuccess, playRetry } from "@/lib/sounds";
 import { BigButton } from "@/components/ui";
 import { RewardOverlay } from "@/components/RewardOverlay";
@@ -124,12 +128,9 @@ function makeProblem(level: number): Problem {
 
 export function OlympiadGenerator() {
   const router = useRouter();
-  const { soundOn, bumpAdvancedMetric, awardStarAndSticker } = useGameStore();
-  const level = useGameStore(
-    (s) =>
-      s.profiles.find((p) => p.id === s.activeProfileId)?.advancedMetrics
-        .olympiadLevel ?? 1
-  );
+  const { soundOn, bumpAdvancedMetric, awardStarAndSticker, recordAnswer } = useGameStore();
+  const level = useSkillLevel(); // adaptive engine drives difficulty
+  const startedAt = useRef(Date.now());
 
   const [problem, setProblem] = useState<Problem>(() => makeProblem(level));
   const [correct, setCorrect] = useState(0);
@@ -137,9 +138,18 @@ export function OlympiadGenerator() {
   const [locked, setLocked] = useState(false);
   const [reward, setReward] = useState<Sticker | null>(null);
 
+  // Every new word problem is read aloud automatically (IGCSE prompts).
+  useAutoNarrate(problem.text, "en-US", 500);
+
   const answer = (n: number) => {
     if (locked) return;
+    const elapsed = Date.now() - startedAt.current;
     if (n === problem.answer) {
+      const { levelChange, newLevel } = recordAnswer(true, elapsed);
+      if (levelChange === 1)
+        narrateCelebration(`Incredible! You reached level ${newLevel}! The problems get trickier now — you're ready.`);
+      else if (levelChange === -1)
+        narrateCelebration("Let's take it a little easier and build up again. You're doing great!");
       setLocked(true);
       setFeedback("right");
       playSuccess(soundOn);
@@ -156,12 +166,25 @@ export function OlympiadGenerator() {
         setProblem(makeProblem(level));
         setFeedback("none");
         setLocked(false);
+        startedAt.current = Date.now();
       }, 1000);
     } else {
+      recordAnswer(false, elapsed);
+      narrateMistake(
+        `Not yet! Listen again: ${problem.text} Take your time — count it step by step.`
+      );
       setFeedback("wrong");
-      playRetry(soundOn);
       setTimeout(() => setFeedback("none"), 900);
     }
+  };
+
+  const onVoice = (t: string) => {
+    const n = numberFromSpeech(t);
+    if (n === null) {
+      narrate("I didn't hear a number. Try saying just the answer, like: twelve!");
+      return;
+    }
+    answer(n);
   };
 
   return (
@@ -195,6 +218,9 @@ export function OlympiadGenerator() {
         <p className="font-body text-xl text-slate-700 text-center leading-relaxed">
           {problem.text}
         </p>
+        <div className="flex justify-center mt-3">
+          <SpeakButton text={problem.text} />
+        </div>
       </motion.div>
 
       <div className="flex gap-4">
@@ -211,6 +237,8 @@ export function OlympiadGenerator() {
           </BigButton>
         ))}
       </div>
+
+      <MicButton onTranscript={onVoice} prompt="Or say the answer out loud!" />
 
       <AnimatePresence>
         {feedback === "wrong" && (

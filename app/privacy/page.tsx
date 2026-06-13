@@ -50,7 +50,11 @@ export default function PrivacyPage() {
           not access the camera, microphone, contacts, or location, and does
           not include links that take children outside the app. The
           read-aloud feature uses your device&apos;s built-in text-to-speech
-          engine; no audio or text leaves the device.
+          engine, and the optional voice-answer feature uses your
+          device&apos;s built-in speech recognizer (the app asks for
+          microphone permission first). Audio is processed by your
+          device&apos;s system speech service and is not recorded, stored,
+          or transmitted by KidVenture.
         </p>
 
         <h2 className="font-display text-xl text-slate-800 mt-6 mb-2">

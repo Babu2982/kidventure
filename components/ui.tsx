@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Component, type ReactNode, useEffect, useState } from "react";
 import { useAppStore, useActiveProfile } from "@/store/useAppStore";
 import { playTap, startMusic, stopMusic } from "@/lib/sounds";
+import { initVoice } from "@/lib/voice";
+import { stopSpeaking } from "@/lib/tts";
 
 /* ================= BigButton ================= */
 
@@ -49,12 +51,16 @@ export function BigButton({
 export function TopBar({ title, emoji }: { title: string; emoji: string }) {
   const router = useRouter();
   const profile = useActiveProfile();
-  const { soundOn, toggleSound, musicOn, toggleMusic } = useAppStore();
+  const { soundOn, toggleSound, musicOn, toggleMusic, narrationOn, toggleNarration } = useAppStore();
 
   useEffect(() => {
+    initVoice(); // probe native STT availability once per screen tree
     if (musicOn) startMusic();
     else stopMusic();
-    return () => stopMusic();
+    return () => {
+      stopMusic();
+      stopSpeaking(); // never let narration talk over the next screen
+    };
   }, [musicOn]);
 
   return (
@@ -88,6 +94,14 @@ export function TopBar({ title, emoji }: { title: string; emoji: string }) {
           onClick={toggleSound}
         >
           {soundOn ? "🔊" : "🔇"}
+        </BigButton>
+        <BigButton
+          color={narrationOn ? "bg-sky-kid" : "bg-white"}
+          className="!min-h-[56px] !px-3 !py-2 !text-2xl"
+          ariaLabel={narrationOn ? "Turn voice guide off" : "Turn voice guide on"}
+          onClick={() => { stopSpeaking(); toggleNarration(); }}
+        >
+          🗣️
         </BigButton>
         <BigButton
           color={musicOn ? "bg-grape text-white" : "bg-white"}

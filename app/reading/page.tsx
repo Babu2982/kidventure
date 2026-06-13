@@ -9,6 +9,7 @@ import { RewardOverlay } from "@/components/RewardOverlay";
 import { useAppStore, useLearningMode, type Sticker } from "@/store/useAppStore";
 import { playSuccess, playRetry, playTap } from "@/lib/sounds";
 import { StoryReader, TamilSpeaker } from "@/components/StoryAndTamil";
+import { useAutoNarrate, narrateMistake, MODULE_INTROS } from "@/lib/narrator";
 import { LetterTracer } from "@/components/LetterTracer";
 
 /**
@@ -60,9 +61,17 @@ const LANG_TABS = [
 
 type LangTab = (typeof LANG_TABS)[number]["id"];
 
+const TAB_INTROS: Record<LangTab, string> = {
+  english: MODULE_INTROS.readingStory,
+  hindi: MODULE_INTROS.readingTrace,
+  kannada: MODULE_INTROS.readingTrace,
+  tamil: MODULE_INTROS.readingTamil,
+};
+
 function AdvancedReading() {
   const soundOn = useAppStore((s) => s.soundOn);
   const [tab, setTab] = useState<LangTab>("english");
+  useAutoNarrate(TAB_INTROS[tab]);
   return (
     <main className="min-h-dvh bg-sky-scene flex flex-col">
       <TopBar title="Reading Island" emoji="📚" />
@@ -96,6 +105,7 @@ function AdvancedReading() {
 function LetterMatch() {
   const router = useRouter();
   const { soundOn, awardStarAndSticker } = useAppStore();
+  useAutoNarrate(MODULE_INTROS.readingJunior);
   const [letters, setLetters] = useState<string[]>(makeLetters);
   const [targets] = useState(() => shuffle(Array.from({ length: PAIRS_PER_ROUND }, (_, i) => i)));
   const [matched, setMatched] = useState<Set<string>>(new Set());
@@ -116,7 +126,9 @@ function LetterMatch() {
         setTimeout(() => setReward(awardStarAndSticker("reading")), 700);
       }
     } else {
-      playRetry(soundOn);
+      narrateMistake(
+        `That little ${lower} doesn't live with the big ${upper.toUpperCase()}. Look for the big letter that makes the same sound!`
+      );
       setShaking(lower);
       setTimeout(() => setShaking(null), 500);
     }
