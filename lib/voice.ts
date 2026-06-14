@@ -103,36 +103,52 @@ export function listenOnce(opts: ListenOpts): () => void {
         }
         if (cancelled) return;
 
-        // Listen for partial results via the event listener — more
-        // reliable on Samsung than awaiting start()'s return value.
-        dbg("adding partialResults listener...");
-        await SpeechRecognition.addListener("partialResults", (data: any) => {
-          const matches: string[] = data?.matches ?? [];
-          dbg(`partialResults: ${JSON.stringify(matches).slice(0, 60)}`);
+        // Listen for results via BOTH the listener and start()'s return.
+        // Samsung delivers via one or the other depending on version.
+        dbg("adding listeners...");
+        const handleMatches = (matches: string[], src: string) => {
+          dbg(`${src}: ${matches.length ? matches[0] : "(empty)"}`);
           if (matches.length && matches[0] && !gotResult) {
             gotResult = true;
             clearTimeout(timeout);
             cleanup();
             finish(() => onResult(matches.join(" | ")));
           }
-        });
+        };
 
-        dbg("calling start() with partialResults...");
-        // start() with partialResults true; result comes via listener
+        try {
+          await SpeechRecognition.addListener("partialResults", (data: any) => {
+            handleMatches(Array.isArray(data?.matches) ? data.matches : [], "partial");
+          });
+          await SpeechRecognition.addListener("listeningState", (data: any) => {
+            dbg(`listeningState: ${data?.status ?? JSON.stringify(data)}`);
+          });
+        } catch (le: any) {
+          dbg(`addListener failed (ok): ${le?.message ?? le}`);
+        }
+
+        dbg("calling start()...");
         SpeechRecognition.start({
           language: lang,
-          maxResults: 3,
+          maxResults: 5,
           partialResults: true,
           popup: false,
         }).then((res: any) => {
-          // Some Android versions also return final matches here
-          dbg(`start() resolved: ${JSON.stringify(res).slice(0, 60)}`);
-          const matches: string[] = res?.matches ?? [];
-          if (matches.length && matches[0] && !gotResult) {
-            gotResult = true;
-            clearTimeout(timeout);
-            cleanup();
-            finish(() => onResult(matches.join(" | ")));
+          // Guard: res may be undefined (Samsung delivers via listener)
+          const safe = res == null ? "undefined" : JSON.stringify(res);
+          dbg(`start() returned: ${safe.slice(0, 60)}`);
+          const matches: string[] = Array.isArray(res?.matches) ? res.matches : [];
+          handleMatches(matches, "start-return");
+          // If start resolved but no matches came anywhere, it means
+          // recognition ended with nothing — report no-speech (not crash)
+          if (!gotResult) {
+            setTimeout(() => {
+              if (!gotResult && !cancelled) {
+                clearTimeout(timeout);
+                cleanup();
+                finish(() => onError?.("no-speech"));
+              }
+            }, 1500);
           }
         }).catch((e: any) => {
           const msg = String(e?.message ?? e);
@@ -140,8 +156,11 @@ export function listenOnce(opts: ListenOpts): () => void {
           if (!gotResult && !cancelled) {
             clearTimeout(timeout);
             cleanup();
-            if (msg.includes("abort") || msg.includes("stop")) finish();
-            else finish(() => onError?.(msg));
+            if (msg.includes("abort") || msg.includes("stop") || msg.includes("No match")) {
+              finish(() => onError?.("no-speech"));
+            } else {
+              finish(() => onError?.(msg));
+            }
           }
         });
       } catch (e: any) {
