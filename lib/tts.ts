@@ -78,25 +78,32 @@ export function speak(
 
   /* ---- NATIVE ---- */
   if (Capacitor.isNativePlatform()) {
-    dbg(`speak() native: "${text.slice(0, 30)}" lang=${lang}`);
+    dbg(`speak() native START: "${text.slice(0, 25)}"`);
     (async () => {
       try {
+        dbg("about to await TTS()...");
         const t = await TTS();
-        await t.stop();
-        dbg("TextToSpeech.stop() ok, calling speak...");
-        await t.speak({
+        dbg(`TTS() returned: ${t ? "object" : "NULL"}, has speak: ${typeof t?.speak}`);
+        try {
+          await t.stop();
+          dbg("stop() ok");
+        } catch (se: any) {
+          dbg(`stop() threw (ignoring): ${se?.message ?? se}`);
+        }
+        dbg("calling t.speak() now...");
+        const result = await t.speak({
           text,
           lang,
           rate: 1.0,
-          pitch: 1.1,
+          pitch: 1.0,
           volume: 1.0,
           category: "ambient",
         });
-        dbg("TextToSpeech.speak() resolved ✅");
+        dbg(`speak() RESOLVED ✅ result=${JSON.stringify(result)}`);
         onEnd?.();
       } catch (e: any) {
         const msg = String(e?.message ?? e);
-        dbg(`TextToSpeech.speak() ERROR: ${msg}`);
+        dbg(`speak() CAUGHT ERROR: ${msg}`);
         onEnd?.();
       }
     })();

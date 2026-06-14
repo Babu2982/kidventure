@@ -99,6 +99,22 @@ function Dashboard() {
           </motion.button>
         )}
 
+        {/* DIRECT plugin test — bypasses narrate/speak entirely, calls
+            the TTS plugin exactly like the working debug page did. */}
+        <button
+          onClick={async () => {
+            try {
+              const { TextToSpeech } = await import("@capacitor-community/text-to-speech");
+              await TextToSpeech.speak({ text: "Direct test. Can you hear me?", lang: "en-US" });
+            } catch (e) {
+              console.error("direct test failed", e);
+            }
+          }}
+          className="bg-grass text-white rounded-2xl px-5 py-2 font-display text-sm"
+        >
+          🔧 Direct TTS test
+        </button>
+
         <div className="grid grid-cols-2 gap-4 sm:gap-6 w-full max-w-2xl">
           {ISLANDS.map((isle, i) => (
             <motion.button
