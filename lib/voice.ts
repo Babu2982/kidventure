@@ -8,13 +8,18 @@
 import { Capacitor } from "@capacitor/core";
 import { dbg } from "@/lib/dbg";
 
-// Lazy-loaded to avoid running the plugin's browser code during SSR
-// prerender. Cached after first load so the bridge stays registered.
 let _SR: any = null;
 async function SR_plugin() {
   if (_SR) return _SR;
-  const mod = await import("@capacitor-community/speech-recognition");
-  _SR = mod.SpeechRecognition;
+  try {
+    const mod = await import(
+      /* webpackMode: "eager" */ "@capacitor-community/speech-recognition"
+    );
+    _SR = mod.SpeechRecognition;
+  } catch (e: any) {
+    dbg(`SR import FAILED: ${e?.message ?? e}`);
+    throw e;
+  }
   return _SR;
 }
 
@@ -74,6 +79,93 @@ export function listenOnce(opts: ListenOpts): () => void {
 
   /* ---- NATIVE ---- */
   if (isNative()) {
+    dbg(`listenOnce native lang=${lang}`);
+    let cancelled = false;
+    let SpeechRecognition: any = null;
+    let gotResult = false;
+
+    const cleanup = () => {
+      try { SpeechRecognition?.removeAllListeners?.(); } catch {}
+      try { SpeechRecognition?.stop?.(); } catch {}
+    };
+
+    const timeout = setTimeout(() => {
+      dbg("listenOnce TIMEOUT");
+      cleanup();
+      finish(() => onError?.("timeout"));
+    }, maxMs);
+
+    (async () => {
+      try {
+        SpeechRecognition = await SR_plugin();
+        dbg("SR plugin loaded, requesting perms...");
+        const perm = await SpeechRecognition.requestPermissions();
+        dbg(`perm: ${JSON.stringify(perm)}`);
+        if (perm.speechRecognition !== "granted") {
+          clearTimeout(timeout);
+          finish(() => onError?.("mic-denied"));
+          return;
+        }
+        if (cancelled) return;
+
+        // Listen for partial results via the event listener — more
+        // reliable on Samsung than awaiting start()'s return value.
+        dbg("adding partialResults listener...");
+        await SpeechRecognition.addListener("partialResults", (data: any) => {
+          const matches: string[] = data?.matches ?? [];
+          dbg(`partialResults: ${JSON.stringify(matches).slice(0, 60)}`);
+          if (matches.length && matches[0] && !gotResult) {
+            gotResult = true;
+            clearTimeout(timeout);
+            cleanup();
+            finish(() => onResult(matches.join(" | ")));
+          }
+        });
+
+        dbg("calling start() with partialResults...");
+        // start() with partialResults true; result comes via listener
+        SpeechRecognition.start({
+          language: lang,
+          maxResults: 3,
+          partialResults: true,
+          popup: false,
+        }).then((res: any) => {
+          // Some Android versions also return final matches here
+          dbg(`start() resolved: ${JSON.stringify(res).slice(0, 60)}`);
+          const matches: string[] = res?.matches ?? [];
+          if (matches.length && matches[0] && !gotResult) {
+            gotResult = true;
+            clearTimeout(timeout);
+            cleanup();
+            finish(() => onResult(matches.join(" | ")));
+          }
+        }).catch((e: any) => {
+          const msg = String(e?.message ?? e);
+          dbg(`start() error: ${msg}`);
+          if (!gotResult && !cancelled) {
+            clearTimeout(timeout);
+            cleanup();
+            if (msg.includes("abort") || msg.includes("stop")) finish();
+            else finish(() => onError?.(msg));
+          }
+        });
+      } catch (e: any) {
+        clearTimeout(timeout);
+        dbg(`native STT setup ERROR: ${e?.message ?? e}`);
+        if (!cancelled) finish(() => onError?.(String(e?.message ?? e)));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+      cleanup();
+      finish();
+    };
+  }
+
+  /* ---- OLD NATIVE (disabled) ---- */
+  if (false) {
     dbg(`listenOnce native lang=${lang}`);
     let cancelled = false;
     let SpeechRecognition: any = null;

@@ -97,11 +97,15 @@ export function TopBar({ title, emoji }: { title: string; emoji: string }) {
         </BigButton>
         <BigButton
           color={narrationOn ? "bg-sky-kid" : "bg-white"}
-          className="!min-h-[56px] !px-3 !py-2 !text-2xl"
-          ariaLabel={narrationOn ? "Turn voice guide off" : "Turn voice guide on"}
+          className="!min-h-[56px] !px-3 !py-2 !text-xl relative"
+          ariaLabel={narrationOn ? "Voice guide is ON, tap to turn off" : "Voice guide is OFF, tap to turn on"}
           onClick={() => { stopSpeaking(); toggleNarration(); }}
         >
           🗣️
+          <span className={`absolute -bottom-1 -right-1 text-[9px] font-bold rounded-full px-1
+            ${narrationOn ? "bg-grass text-white" : "bg-red-500 text-white"}`}>
+            {narrationOn ? "ON" : "OFF"}
+          </span>
         </BigButton>
         <BigButton
           color={musicOn ? "bg-grape text-white" : "bg-white"}

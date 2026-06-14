@@ -68,10 +68,16 @@ function Dashboard() {
     initVoice();
   }, []);
 
+  const toggleNarration = useAppStore((s) => s.toggleNarration);
+
   const handleGreet = () => {
-    if (greeted) return;
     setGreeted(true);
-    narrate(`Hi ${profile.name}! Pick an island to start learning!`);
+    // Force narration ON so the greeting always speaks, regardless of
+    // any earlier accidental toggle of the 🗣️ button.
+    if (!useAppStore.getState().narrationOn) toggleNarration();
+    setTimeout(() => {
+      narrate(`Hi ${profile.name}! Pick an island to start learning!`);
+    }, 120);
   };
 
   return (
@@ -79,13 +85,13 @@ function Dashboard() {
       <TopBar title={`Hi, ${profile.name}!`} emoji={profile.avatar} />
 
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-5 pb-6">
-        {/* First-gesture button — also triggers Android TTS unlock */}
-        {!greeted && narrationOn && (
+        {/* First-gesture button — forces narration on + speaks greeting */}
+        {!greeted && (
           <motion.button
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             onClick={handleGreet}
-            className="bg-white rounded-[2rem] shadow-chunky px-6 py-3 flex items-center gap-3 font-display text-xl text-slate-700"
+            className="bg-sun rounded-[2rem] shadow-chunky px-6 py-3 flex items-center gap-3 font-display text-xl text-slate-700"
             aria-label="Tap to hear welcome"
           >
             <span className="text-3xl" aria-hidden>🗣️</span>

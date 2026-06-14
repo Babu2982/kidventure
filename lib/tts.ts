@@ -15,14 +15,21 @@
 import { Capacitor } from "@capacitor/core";
 import { dbg } from "@/lib/dbg";
 
-// Lazy-loaded (cached) to avoid running the plugin's browser code during
-// SSR prerender. On the client the first call loads + registers the
-// native bridge, then it's reused.
+// Dynamic import with webpackMode eager: bundles into the parent chunk
+// (so it exists in the APK file:// bundle) while still deferring the
+// window-touching plugin code out of the SSR prerender path.
 let _TTS: any = null;
 async function TTS() {
   if (_TTS) return _TTS;
-  const mod = await import("@capacitor-community/text-to-speech");
-  _TTS = mod.TextToSpeech;
+  try {
+    const mod = await import(
+      /* webpackMode: "eager" */ "@capacitor-community/text-to-speech"
+    );
+    _TTS = mod.TextToSpeech;
+  } catch (e: any) {
+    dbg(`TTS import FAILED: ${e?.message ?? e}`);
+    throw e;
+  }
   return _TTS;
 }
 
