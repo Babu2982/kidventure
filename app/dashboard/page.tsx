@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { ClientGate, TopBar } from "@/components/ui";
 import { narrate } from "@/lib/narrator";
 import { warmVoices, initNativeTTS, directSpeak } from "@/lib/tts";
-import { initVoice } from "@/lib/voice";
+import { initVoice, requestMic } from "@/lib/voice";
 import { useActiveProfile, useAppStore } from "@/store/useAppStore";
 import { playTap } from "@/lib/sounds";
 
@@ -66,6 +66,10 @@ function Dashboard() {
     warmVoices();
     initNativeTTS(); // pre-warm Android TTS engine
     initVoice();
+    // Request mic permission once, early — so the system dialog appears
+    // here (a calm moment) instead of mid-game. Granted once, never asked
+    // again. Android requires a user dialog the first time regardless.
+    requestMic().catch(() => {});
   }, []);
 
   const toggleNarration = useAppStore((s) => s.toggleNarration);

@@ -78,22 +78,57 @@ export function listenOnce(opts: ListenOpts): () => void {
     let cancelled = false;
     let SpeechRecognition: any = null;
     let gotResult = false;
+    let lastPartial = "";
 
-    const cleanup = () => {
+    const removeListeners = () => {
       try { SpeechRecognition?.removeAllListeners?.(); } catch {}
+    };
+    const stopRec = () => {
       try { SpeechRecognition?.stop?.(); } catch {}
+    };
+
+    // Deliver whatever we have (final match, or best partial heard).
+    const deliver = (matches: string[], src: string) => {
+      if (gotResult || cancelled) return;
+      const best = matches.find((m) => m && m.trim()) || lastPartial;
+      dbg(`deliver(${src}): "${best}"`);
+      if (best && best.trim()) {
+        gotResult = true;
+        clearTimeout(timeout);
+        clearTimeout(silenceTimer);
+        removeListeners();
+        stopRec();
+        finish(() => onResult(best));
+      }
+    };
+
+    // If recognition is taking a while, finalize on the best partial we
+    // captured rather than losing the child's answer.
+    let silenceTimer: any = null;
+    const armSilenceFinalize = () => {
+      clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => {
+        if (!gotResult && !cancelled && lastPartial.trim()) {
+          dbg("silence finalize on partial");
+          deliver([lastPartial], "silence-finalize");
+        }
+      }, 1800); // 1.8s after the last partial word heard
     };
 
     const timeout = setTimeout(() => {
       dbg("listenOnce TIMEOUT");
-      cleanup();
-      finish(() => onError?.("timeout"));
+      if (lastPartial.trim()) { deliver([lastPartial], "timeout-partial"); return; }
+      clearTimeout(silenceTimer);
+      removeListeners();
+      stopRec();
+      finish(() => onError?.("no-speech"));
     }, maxMs);
 
     (async () => {
       try {
         SpeechRecognition = SR_get();
-        dbg("SR plugin loaded, requesting perms...");
+        // Permission should already be granted from app-startup request,
+        // but double-check (no-op if already granted, no dialog shown).
         const perm = await SpeechRecognition.requestPermissions();
         dbg(`perm: ${JSON.stringify(perm)}`);
         if (perm.speechRecognition !== "granted") {
@@ -103,95 +138,59 @@ export function listenOnce(opts: ListenOpts): () => void {
         }
         if (cancelled) return;
 
-        // Listen for results via BOTH the listener and start()'s return.
-        // Samsung delivers via one or the other depending on version.
-        dbg("adding listeners...");
-        const handleMatches = (matches: string[], src: string) => {
-          dbg(`${src}: ${matches.length ? matches[0] : "(empty)"}`);
-          if (matches.length && matches[0] && !gotResult) {
-            gotResult = true;
-            clearTimeout(timeout);
-            cleanup();
-            finish(() => onResult(matches.join(" | ")));
+        // LISTENER-FIRST: register before start() so no event is missed.
+        dbg("registering listeners...");
+        try { await SpeechRecognition.removeAllListeners(); } catch {}
+
+        await SpeechRecognition.addListener("partialResults", (data: any) => {
+          const m: string[] = Array.isArray(data?.matches) ? data.matches : [];
+          if (m.length && m[0] && m[0].trim()) {
+            lastPartial = m[0];
+            dbg(`partial: "${lastPartial}"`);
+            armSilenceFinalize(); // each word resets the silence finalize
           }
-        };
+        });
+        await SpeechRecognition.addListener("listeningState", (data: any) => {
+          const status = data?.status ?? JSON.stringify(data);
+          dbg(`listeningState: ${status}`);
+          if (status === "stopped" && !gotResult && !cancelled) {
+            // ended — deliver best partial if we have one
+            if (lastPartial.trim()) deliver([lastPartial], "stopped-partial");
+            // else let the timeout / start() result handle it
+          }
+        });
 
-        try {
-          await SpeechRecognition.addListener("partialResults", (data: any) => {
-            handleMatches(Array.isArray(data?.matches) ? data.matches : [], "partial");
-          });
-          // Samsung fires the FINAL result on "results" (not partialResults)
-          await SpeechRecognition.addListener("results", (data: any) => {
-            handleMatches(Array.isArray(data?.matches) ? data.matches : [], "results");
-          });
-          await SpeechRecognition.addListener("listeningState", (data: any) => {
-            const status = data?.status ?? JSON.stringify(data);
-            dbg(`listeningState: ${status}`);
-            // When recognition STOPS with no result captured, finish gracefully
-            if (status === "stopped" && !gotResult && !cancelled) {
-              clearTimeout(timeout);
-              cleanup();
-              finish(() => onError?.("no-speech"));
-            }
-          });
-        } catch (le: any) {
-          dbg(`addListener failed (ok): ${le?.message ?? le}`);
-        }
+        if (cancelled) return;
+        dbg("calling start() (listener-driven, no await-react)...");
 
-        dbg("calling start() inline...");
-        // Inline recognition (no popup). Samsung's default silence cutoff
-        // is ~1s which is too short for a child. We pass Android
-        // SpeechRecognizer EXTRA_* timeouts to keep it listening longer.
-        // If the first attempt returns empty, we auto-retry once.
-        const startAttempt = (attempt: number) => {
-          dbg(`start() attempt ${attempt}`);
-          SpeechRecognition.start({
-            language: lang,
-            maxResults: 5,
-            partialResults: true,
-            popup: false,
-            // Android SpeechRecognizer extras (ms): keep listening through
-            // a child's natural pauses instead of cutting off instantly.
-            // The plugin forwards unknown keys to the recognizer intent.
-            silenceThreshold: 2500,
-            possiblyCompleteSilenceLength: 2500,
-            minimumLength: 3000,
-          } as any).then((res: any) => {
-            const safe = res == null ? "undefined" : JSON.stringify(res);
-            dbg(`start() returned: ${safe.slice(0, 80)}`);
-            const matches: string[] = Array.isArray(res?.matches) ? res.matches : [];
-            if (matches.length) {
-              handleMatches(matches, "inline-result");
-            } else if (attempt < 2 && !gotResult && !cancelled) {
-              dbg("empty result — retrying once");
-              setTimeout(() => { if (!gotResult && !cancelled) startAttempt(attempt + 1); }, 300);
-            } else if (!gotResult && !cancelled) {
-              clearTimeout(timeout);
-              cleanup();
-              finish(() => onError?.("no-speech"));
-            }
-          }).catch((e: any) => {
-            const msg = String(e?.message ?? e);
-            dbg(`start() error: ${msg}`);
-            if (gotResult || cancelled) return;
-            // "No match"/timeout on first try → retry once
-            if (attempt < 2 && (msg.includes("No match") || msg.includes("timeout") || msg.includes("7") || msg.includes("6"))) {
-              dbg("error — retrying once");
-              setTimeout(() => { if (!gotResult && !cancelled) startAttempt(attempt + 1); }, 300);
-              return;
-            }
+        // Fire start(). We do NOT react to empty returns or retry —
+        // results flow through the partialResults listener above. We only
+        // use the resolved value if it happens to carry final matches.
+        SpeechRecognition.start({
+          language: lang,
+          maxResults: 5,
+          partialResults: true,
+          popup: false,
+        }).then((res: any) => {
+          const m: string[] = Array.isArray(res?.matches) ? res.matches : [];
+          dbg(`start() resolved matches=${JSON.stringify(m).slice(0, 60)}`);
+          if (m.length) deliver(m, "start-final");
+          // If empty, do nothing — listener / silenceTimer / timeout handle it.
+        }).catch((e: any) => {
+          const msg = String(e?.message ?? e);
+          dbg(`start() error: ${msg}`);
+          // On error, salvage any partial we heard; otherwise no-speech.
+          if (!gotResult && !cancelled) {
+            if (lastPartial.trim()) { deliver([lastPartial], "error-partial"); return; }
             clearTimeout(timeout);
-            cleanup();
-            if (msg.includes("abort") || msg.includes("stop") || msg.includes("No match") || msg.includes("canceled")) {
-              finish(() => onError?.("no-speech"));
-            } else {
-              finish(() => onError?.(msg));
-            }
-          });
-        };
-        startAttempt(1);
+            clearTimeout(silenceTimer);
+            removeListeners();
+            finish(() => onError?.("no-speech"));
+          }
+        });
       } catch (e: any) {
         clearTimeout(timeout);
+        clearTimeout(silenceTimer);
         dbg(`native STT setup ERROR: ${e?.message ?? e}`);
         if (!cancelled) finish(() => onError?.(String(e?.message ?? e)));
       }
@@ -200,7 +199,9 @@ export function listenOnce(opts: ListenOpts): () => void {
     return () => {
       cancelled = true;
       clearTimeout(timeout);
-      cleanup();
+      clearTimeout(silenceTimer);
+      removeListeners();
+      stopRec();
       finish();
     };
   }
