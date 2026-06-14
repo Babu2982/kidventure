@@ -1,8 +1,12 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClientGate, TopBar } from "@/components/ui";
+import { narrate } from "@/lib/narrator";
+import { warmVoices } from "@/lib/tts";
+import { initVoice } from "@/lib/voice";
 import { useActiveProfile, useAppStore } from "@/store/useAppStore";
 import { playTap } from "@/lib/sounds";
 
@@ -53,13 +57,41 @@ function Dashboard() {
   const router = useRouter();
   const profile = useActiveProfile()!;
   const soundOn = useAppStore((s) => s.soundOn);
+  const narrationOn = useAppStore((s) => s.narrationOn);
   const setActiveProfile = useAppStore((s) => s.setActiveProfile);
+  const [greeted, setGreeted] = useState(false);
+
+  // Warm up TTS + STT on the dashboard (safe: user just tapped a profile)
+  useEffect(() => {
+    warmVoices();
+    initVoice();
+  }, []);
+
+  const handleGreet = () => {
+    if (greeted) return;
+    setGreeted(true);
+    narrate(`Hi ${profile.name}! Pick an island to start learning!`);
+  };
 
   return (
     <main className="min-h-dvh bg-sky-scene flex flex-col">
       <TopBar title={`Hi, ${profile.name}!`} emoji={profile.avatar} />
 
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-5 pb-6">
+        {/* First-gesture button — also triggers Android TTS unlock */}
+        {!greeted && narrationOn && (
+          <motion.button
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            onClick={handleGreet}
+            className="bg-white rounded-[2rem] shadow-chunky px-6 py-3 flex items-center gap-3 font-display text-xl text-slate-700"
+            aria-label="Tap to hear welcome"
+          >
+            <span className="text-3xl" aria-hidden>🗣️</span>
+            Tap me to start!
+          </motion.button>
+        )}
+
         <div className="grid grid-cols-2 gap-4 sm:gap-6 w-full max-w-2xl">
           {ISLANDS.map((isle, i) => (
             <motion.button
