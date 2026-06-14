@@ -15,21 +15,16 @@
 import { Capacitor } from "@capacitor/core";
 import { dbg } from "@/lib/dbg";
 
-// Dynamic import with webpackMode eager: bundles into the parent chunk
-// (so it exists in the APK file:// bundle) while still deferring the
-// window-touching plugin code out of the SSR prerender path.
+// Synchronous require() inside a function. Unlike import(), require()
+// returns synchronously (no promise to hang in the WebView, which was
+// the bug). And because it only runs when called at runtime — never at
+// module load — SSR prerender never touches the window-dependent plugin
+// code. webpack bundles the required module into the chunk.
 let _TTS: any = null;
-async function TTS() {
+function TTS() {
   if (_TTS) return _TTS;
-  try {
-    const mod = await import(
-      /* webpackMode: "eager" */ "@capacitor-community/text-to-speech"
-    );
-    _TTS = mod.TextToSpeech;
-  } catch (e: any) {
-    dbg(`TTS import FAILED: ${e?.message ?? e}`);
-    throw e;
-  }
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  _TTS = require("@capacitor-community/text-to-speech").TextToSpeech;
   return _TTS;
 }
 
@@ -42,8 +37,7 @@ export function ttsSupported(): boolean {
 export async function initNativeTTS(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   try {
-    const t = await TTS();
-    const r = await t.getSupportedLanguages();
+    const r = await TTS().getSupportedLanguages();
     dbg(`initNativeTTS ok: ${(r as any)?.languages?.length ?? 0} langs`);
   } catch (e: any) {
     dbg(`initNativeTTS ERROR: ${e?.message ?? e}`);
@@ -52,7 +46,7 @@ export async function initNativeTTS(): Promise<void> {
 
 export function stopSpeaking() {
   if (Capacitor.isNativePlatform()) {
-    TTS().then((t) => t.stop()).catch(() => {});
+    try { TTS().stop(); } catch {}
     return;
   }
   if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -81,9 +75,9 @@ export function speak(
     dbg(`speak() native START: "${text.slice(0, 25)}"`);
     (async () => {
       try {
-        dbg("about to await TTS()...");
-        const t = await TTS();
-        dbg(`TTS() returned: ${t ? "object" : "NULL"}, has speak: ${typeof t?.speak}`);
+        dbg("getting TTS plugin (sync require)...");
+        const t = TTS();
+        dbg(`TTS() = ${t ? "object" : "NULL"}, speak=${typeof t?.speak}`);
         try {
           await t.stop();
           dbg("stop() ok");
@@ -143,4 +137,16 @@ export function warmVoices() {
   const v = window.speechSynthesis.getVoices();
   if (v.length > 0) return;
   window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+}
+
+
+/** Direct, minimal native speak for diagnostics — no store checks. */
+export async function directSpeak(text: string, lang = "en-US") {
+  if (!Capacitor.isNativePlatform()) {
+    window.speechSynthesis?.speak(new SpeechSynthesisUtterance(text));
+    return;
+  }
+  const t = TTS();
+  await t.stop().catch(() => {});
+  await t.speak({ text, lang, rate: 1.0, pitch: 1.0, volume: 1.0, category: "ambient" });
 }

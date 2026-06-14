@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClientGate, TopBar } from "@/components/ui";
 import { narrate } from "@/lib/narrator";
-import { warmVoices, initNativeTTS } from "@/lib/tts";
+import { warmVoices, initNativeTTS, directSpeak } from "@/lib/tts";
 import { initVoice } from "@/lib/voice";
 import { useActiveProfile, useAppStore } from "@/store/useAppStore";
 import { playTap } from "@/lib/sounds";
@@ -104,8 +104,7 @@ function Dashboard() {
         <button
           onClick={async () => {
             try {
-              const { TextToSpeech } = await import("@capacitor-community/text-to-speech");
-              await TextToSpeech.speak({ text: "Direct test. Can you hear me?", lang: "en-US" });
+              await directSpeak("Direct test. Can you hear me?");
             } catch (e) {
               console.error("direct test failed", e);
             }

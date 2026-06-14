@@ -8,18 +8,13 @@
 import { Capacitor } from "@capacitor/core";
 import { dbg } from "@/lib/dbg";
 
+// Synchronous require() (same fix as tts.ts) — no hanging import promise,
+// no SSR execution since it only runs at call time.
 let _SR: any = null;
-async function SR_plugin() {
+function SR_get() {
   if (_SR) return _SR;
-  try {
-    const mod = await import(
-      /* webpackMode: "eager" */ "@capacitor-community/speech-recognition"
-    );
-    _SR = mod.SpeechRecognition;
-  } catch (e: any) {
-    dbg(`SR import FAILED: ${e?.message ?? e}`);
-    throw e;
-  }
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  _SR = require("@capacitor-community/speech-recognition").SpeechRecognition;
   return _SR;
 }
 
@@ -46,7 +41,7 @@ export function sttSupported(): boolean {
 export async function initVoice(): Promise<void> {
   if (!isNative()) return;
   try {
-    const SpeechRecognition = await SR_plugin();
+    const SpeechRecognition = SR_get();
     const a = await SpeechRecognition.available();
     dbg(`STT available: ${JSON.stringify(a)}`);
   } catch (e: any) {
@@ -57,7 +52,7 @@ export async function initVoice(): Promise<void> {
 export async function requestMic(): Promise<boolean> {
   if (!isNative()) return true;
   try {
-    const SpeechRecognition = await SR_plugin();
+    const SpeechRecognition = SR_get();
     const p = await SpeechRecognition.requestPermissions();
     dbg(`requestMic: ${JSON.stringify(p)}`);
     return p.speechRecognition === "granted";
@@ -97,7 +92,7 @@ export function listenOnce(opts: ListenOpts): () => void {
 
     (async () => {
       try {
-        SpeechRecognition = await SR_plugin();
+        SpeechRecognition = SR_get();
         dbg("SR plugin loaded, requesting perms...");
         const perm = await SpeechRecognition.requestPermissions();
         dbg(`perm: ${JSON.stringify(perm)}`);
@@ -177,7 +172,7 @@ export function listenOnce(opts: ListenOpts): () => void {
 
     (async () => {
       try {
-        SpeechRecognition = await SR_plugin();
+        SpeechRecognition = SR_get();
         // permission
         const perm = await SpeechRecognition.requestPermissions();
         dbg(`perm: ${JSON.stringify(perm)}`);
