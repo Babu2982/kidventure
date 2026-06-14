@@ -58,12 +58,30 @@ export default function TTSTestPage() {
       setVoices(v.map((x) => `${x.name} (${x.lang})`));
       addResult({ label: "Voices loaded immediately", ok: true, detail: `${v.length} voices` });
     } else {
-      addResult({ label: "Voices loaded immediately", ok: false, detail: "0 — waiting for onvoiceschanged" });
-      window.speechSynthesis.onvoiceschanged = () => {
+      addResult({ label: "Voices loaded immediately", ok: false, detail: "0 — polling every 200ms" });
+      // Poll instead of relying on onvoiceschanged (WebView fix)
+      let attempts = 0;
+      const poll = setInterval(() => {
+        attempts++;
         const v2 = window.speechSynthesis.getVoices();
-        addLog(`onvoiceschanged fired: ${v2.length} voices`);
-        setVoices(v2.map((x) => `${x.name} (${x.lang})`));
-        addResult({ label: "Voices after onvoiceschanged", ok: v2.length > 0, detail: `${v2.length} voices` });
+        addLog(`Poll attempt ${attempts}: ${v2.length} voices`);
+        if (v2.length > 0) {
+          clearInterval(poll);
+          setVoices(v2.map((x) => `${x.name} (${x.lang})`));
+          addResult({ label: `Voices after ${attempts} polls (${attempts*200}ms)`, ok: true, detail: `${v2.length} voices` });
+        } else if (attempts >= 25) {
+          clearInterval(poll);
+          addResult({ label: "Voices after 5s polling", ok: false, detail: "Still 0 — TTS engine may not be installed" });
+        }
+      }, 200);
+      // Belt-and-braces: also try onvoiceschanged
+      window.speechSynthesis.onvoiceschanged = () => {
+        const v3 = window.speechSynthesis.getVoices();
+        if (v3.length > 0) {
+          clearInterval(poll);
+          addLog(`onvoiceschanged fired: ${v3.length} voices`);
+          setVoices(v3.map((x) => `${x.name} (${x.lang})`));
+        }
       };
     }
   }, []);

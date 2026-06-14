@@ -1,33 +1,33 @@
 "use client";
 
 /**
- * TTS engine — Web Speech Synthesis, optimized for Android WebView.
+ * TTS engine — Web Speech Synthesis, hardened for Capacitor Android WebView.
  *
- * Android WebView TTS rules:
+ * Key Android WebView differences vs Chrome browser:
  *  1. speechSynthesis.speak() is silently ignored until a user gesture
- *     has occurred in the WebView session. We track this with
- *     `userHasInteracted` and queue any early speak() calls so they
- *     fire on the first tap instead of being lost.
- *  2. Voices load asynchronously. warmVoices() must be called early
- *     and again inside onvoiceschanged.
- *  3. Long utterances (~60s+) get cut off by a WebView bug — we work
- *     around by splitting at sentence boundaries if text is long.
+ *  2. onvoiceschanged fires ONCE then never again, or sometimes never
+ *  3. Voices must be polled — not just waited for via event
+ *  4. Long utterances get cut off — split at sentence boundaries
  */
 
 let userHasInteracted = false;
 let pendingUtterance: (() => void) | null = null;
+let voicesReady = false;
+let voicesPollTimer: any = null;
 
 if (typeof window !== "undefined") {
+  // Capture first gesture to unlock WebView audio
   const unlock = () => {
     userHasInteracted = true;
-    if (pendingUtterance) {
-      const fn = pendingUtterance;
-      pendingUtterance = null;
-      setTimeout(fn, 80); // tiny delay so the gesture fully completes
-    }
     window.removeEventListener("pointerdown", unlock);
     window.removeEventListener("touchstart", unlock);
     window.removeEventListener("click", unlock);
+    // Fire any queued utterance
+    if (pendingUtterance) {
+      const fn = pendingUtterance;
+      pendingUtterance = null;
+      setTimeout(fn, 100);
+    }
   };
   window.addEventListener("pointerdown", unlock, { passive: true });
   window.addEventListener("touchstart", unlock, { passive: true });
@@ -38,11 +38,31 @@ export function ttsSupported(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window;
 }
 
-let voicesLoaded = false;
+/** Poll for voices until they appear — works in WebView where
+ *  onvoiceschanged is unreliable. Tries every 200ms for up to 5s. */
+function pollVoices(callback: (voices: SpeechSynthesisVoice[]) => void) {
+  if (!ttsSupported()) return;
+  if (voicesPollTimer) clearInterval(voicesPollTimer);
+  let attempts = 0;
+  voicesPollTimer = setInterval(() => {
+    attempts++;
+    const v = window.speechSynthesis.getVoices();
+    if (v.length > 0) {
+      voicesReady = true;
+      clearInterval(voicesPollTimer);
+      callback(v);
+    } else if (attempts >= 25) {
+      // 5 seconds elapsed — give up polling, proceed with no voice
+      clearInterval(voicesPollTimer);
+      callback([]);
+    }
+  }, 200);
+}
 
-function pickVoice(lang: string): SpeechSynthesisVoice | null {
-  if (!ttsSupported()) return null;
-  const voices = window.speechSynthesis.getVoices();
+function pickVoice(
+  lang: string,
+  voices: SpeechSynthesisVoice[]
+): SpeechSynthesisVoice | null {
   return (
     voices.find((v) => v.lang === lang) ??
     voices.find((v) => v.lang.startsWith(lang.split("-")[0])) ??
@@ -59,34 +79,65 @@ function doSpeak(
   text: string,
   lang: string,
   rate: number,
+  voices: SpeechSynthesisVoice[],
   onWord?: (i: number) => void,
   onEnd?: () => void
 ) {
   if (!ttsSupported()) { onEnd?.(); return; }
   window.speechSynthesis.cancel();
 
-  // Split long text at sentence ends to avoid the WebView 60s cutoff bug
-  const chunks = text.length > 200
-    ? text.match(/[^.!?]+[.!?]*/g) ?? [text]
-    : [text];
+  // Split at sentence boundaries to avoid the WebView 60s cutoff bug
+  const chunks =
+    text.length > 150
+      ? (text.match(/[^.!?]+[.!?]*/g) ?? [text])
+      : [text];
 
   let idx = 0;
   const speakNext = () => {
     if (idx >= chunks.length) { onEnd?.(); return; }
-    const u = new SpeechSynthesisUtterance(chunks[idx++].trim());
+    const chunk = chunks[idx++].trim();
+    if (!chunk) { speakNext(); return; }
+    const u = new SpeechSynthesisUtterance(chunk);
     u.lang = lang;
     u.rate = rate;
     u.pitch = 1.05;
-    const voice = pickVoice(lang);
+    const voice = pickVoice(lang, voices);
     if (voice) u.voice = voice;
     u.onboundary = (e) => {
-      if (e.name === "word" || e.charIndex !== undefined) onWord?.(e.charIndex);
+      if (e.name === "word") onWord?.(e.charIndex);
     };
     u.onend = speakNext;
-    u.onerror = () => onEnd?.();
+    u.onerror = (e) => {
+      // 'interrupted' is normal when cancel() is called — not a real error
+      if (e.error !== "interrupted") onEnd?.();
+    };
     window.speechSynthesis.speak(u);
   };
   speakNext();
+}
+
+function speakWhenReady(
+  text: string,
+  lang: string,
+  rate: number,
+  onWord?: (i: number) => void,
+  onEnd?: () => void
+) {
+  const go = (voices: SpeechSynthesisVoice[]) => {
+    if (userHasInteracted) {
+      doSpeak(text, lang, rate, voices, onWord, onEnd);
+    } else {
+      // Queue — fires on next tap anywhere on the screen
+      pendingUtterance = () =>
+        doSpeak(text, lang, rate, voices, onWord, onEnd);
+    }
+  };
+
+  if (voicesReady) {
+    go(window.speechSynthesis.getVoices());
+  } else {
+    pollVoices((voices) => go(voices));
+  }
 }
 
 export function speak(
@@ -104,24 +155,25 @@ export function speak(
   } = {}
 ): () => void {
   if (!ttsSupported()) { onEnd?.(); return () => {}; }
-
-  if (userHasInteracted) {
-    doSpeak(text, lang, rate, onWord, onEnd);
-  } else {
-    // Queue for first touch — replaces any already-queued utterance
-    // so only the most recent pending narration fires on unlock
-    pendingUtterance = () => doSpeak(text, lang, rate, onWord, onEnd);
-  }
-  return () => { stopSpeaking(); };
+  speakWhenReady(text, lang, rate, onWord, onEnd);
+  return () => stopSpeaking();
 }
 
-/** Call once at app startup and on every screen to pre-load voices. */
+/** Call at app startup to begin polling voices immediately. */
 export function warmVoices() {
-  if (!ttsSupported() || voicesLoaded) return;
-  const v = window.speechSynthesis.getVoices();
-  if (v.length) { voicesLoaded = true; return; }
+  if (!ttsSupported() || voicesReady) return;
+  // Start the poll — voices will be cached when they arrive
+  const existing = window.speechSynthesis.getVoices();
+  if (existing.length > 0) {
+    voicesReady = true;
+    return;
+  }
+  // Also set up onvoiceschanged as a belt-and-braces backup
   window.speechSynthesis.onvoiceschanged = () => {
-    window.speechSynthesis.getVoices();
-    voicesLoaded = true;
+    if (!voicesReady) {
+      const v = window.speechSynthesis.getVoices();
+      if (v.length > 0) voicesReady = true;
+    }
   };
+  pollVoices(() => {}); // kick off polling early
 }
