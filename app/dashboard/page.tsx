@@ -148,16 +148,21 @@ function Dashboard() {
           </span>
         </motion.button>
 
-        <button
-          onClick={() => {
-            setActiveProfile(null);
-            router.push("/");
-          }}
-          className="font-body text-slate-400 underline underline-offset-4 py-2"
-          aria-label="Switch player"
-        >
-          🔄 Switch player
-        </button>
+        <div className="flex gap-4">
+          <button
+            onClick={() => { setActiveProfile(null); router.push("/"); }}
+            className="font-body text-slate-400 underline underline-offset-4 py-2"
+            aria-label="Switch player"
+          >
+            🔄 Switch player
+          </button>
+          <button
+            onClick={() => router.push("/tts-test")}
+            className="font-body text-slate-300 underline underline-offset-4 py-2 text-xs"
+          >
+            🔬 Debug
+          </button>
+        </div>
       </div>
     </main>
   );
