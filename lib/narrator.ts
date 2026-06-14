@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Capacitor } from "@capacitor/core";
 import { speak, stopSpeaking, ttsSupported, warmVoices } from "@/lib/tts";
 import { playRetry } from "@/lib/sounds";
 import { useGameStore } from "@/store/useGameStore";
@@ -8,7 +9,10 @@ import { useGameStore } from "@/store/useGameStore";
 export type NarrationLang = "en-US" | "hi-IN" | "kn-IN" | "ta-IN";
 
 function narrationEnabled(): boolean {
-  return useGameStore.getState().narrationOn && ttsSupported();
+  if (!useGameStore.getState().narrationOn) return false;
+  // On native Android, the TTS plugin is always available
+  if (typeof window !== "undefined" && Capacitor.isNativePlatform()) return true;
+  return ttsSupported();
 }
 
 export function narrate(text: string, lang: NarrationLang = "en-US") {
@@ -49,24 +53,22 @@ export function useAutoNarrate(
   useEffect(() => {
     warmVoices();
     if (!text) return;
-    // Reset guard whenever text changes so new prompts always speak
     if (text !== lastSpoken.current) {
       lastSpoken.current = null;
     }
     if (lastSpoken.current === text) return;
     if (!narrationEnabled()) return;
 
+    // Native plugin doesn't need gesture unlock — use shorter delay
+    const delay = Capacitor.isNativePlatform() ? 400 : delayMs;
+
     const t = setTimeout(() => {
-      if (lastSpoken.current === text) return; // double-fire guard
+      if (lastSpoken.current === text) return;
       lastSpoken.current = text;
       speak(text, { lang, rate: 0.85 });
-    }, delayMs);
+    }, delay);
 
-    return () => {
-      clearTimeout(t);
-      // Only stop if we were the ones speaking (don't cancel a
-      // mid-sentence narration when a re-render briefly unmounts)
-    };
+    return () => { clearTimeout(t); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, lang]);
 }

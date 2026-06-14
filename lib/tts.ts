@@ -43,7 +43,9 @@ export async function initNativeTTS(): Promise<void> {
 }
 
 export function ttsSupported(): boolean {
-  if (Capacitor.isNativePlatform()) return true;
+  // On native Android/iOS we use the native TTS plugin — always supported
+  if (typeof window !== "undefined" && Capacitor.isNativePlatform()) return true;
+  // On web use speechSynthesis
   return typeof window !== "undefined" && "speechSynthesis" in window;
 }
 
