@@ -74,6 +74,12 @@ export function listenOnce(opts: ListenOpts): () => void {
   /* ---- Native Android path ---- */
   if (isNative()) {
     let cancelled = false;
+
+    const timeout = setTimeout(async () => {
+      try { const sr = await getNativePlugin(); await sr.stop(); } catch {}
+      finish(() => onError?.("timeout"));
+    }, maxMs);
+
     (async () => {
       try {
         const sr = await getNativePlugin();
@@ -84,47 +90,53 @@ export function listenOnce(opts: ListenOpts): () => void {
           permissionGranted = perm.speechRecognition === "granted";
         }
         if (!permissionGranted) {
+          clearTimeout(timeout);
           finish(() => onError?.("mic-denied"));
           return;
         }
 
-        // Stop any previous session cleanly
+        // Clean up any previous session
         try { await sr.stop(); } catch {}
-        await new Promise(r => setTimeout(r, 150)); // brief settle
-
+        await new Promise((r) => setTimeout(r, 200));
         if (cancelled) return;
 
-        const res = await sr.start({
+        sr.start({
           language: lang,
           maxResults: 3,
           partialResults: false,
           popup: false,
+        }).then((res: any) => {
+          if (cancelled) return;
+          clearTimeout(timeout);
+          const matches: string[] = res?.matches ?? [];
+          if (matches.length > 0 && matches[0]) {
+            finish(() => onResult(matches.join(" | ")));
+          } else {
+            finish(() => onError?.("no-speech"));
+          }
+        }).catch((e: any) => {
+          if (cancelled) return;
+          clearTimeout(timeout);
+          const msg = e?.message ?? String(e);
+          if (msg.includes("aborted") || msg.includes("stop")) {
+            finish(); // normal cancellation
+          } else {
+            finish(() => onError?.(`native: ${msg}`));
+          }
         });
 
-        if (cancelled) return;
-        const matches: string[] = res?.matches ?? [];
-        const text = matches[0] ?? "";
-        if (text) {
-          finish(() => onResult(matches.join(" | ")));
-        } else {
-          finish(() => onError?.("no-speech"));
-        }
       } catch (e: any) {
         if (!cancelled) {
-          finish(() => onError?.(`native-error: ${e?.message ?? e}`));
+          clearTimeout(timeout);
+          finish(() => onError?.(`init-error: ${e?.message ?? e}`));
         }
       }
     })();
 
-    const timeout = setTimeout(async () => {
-      try { const sr = await getNativePlugin(); await sr.stop(); } catch {}
-      finish(() => onError?.("timeout"));
-    }, maxMs);
-
     return () => {
       cancelled = true;
       clearTimeout(timeout);
-      getNativePlugin().then(sr => sr.stop()).catch(() => {});
+      getNativePlugin().then((sr) => sr.stop()).catch(() => {});
       finish();
     };
   }

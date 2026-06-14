@@ -87,8 +87,16 @@ export function MicButton({
     setHeard(null);
     setMicState("requesting");
 
-    // Explicit permission request before starting — shows Android dialog
+    // 5 second timeout on permission request — native dialog can hang
+    const permTimeout = setTimeout(() => {
+      if (micState === "requesting") {
+        setMicState("idle");
+      }
+    }, 5000);
+
     const granted = await requestMic();
+    clearTimeout(permTimeout);
+
     if (!granted) {
       setMicState("denied");
       setTimeout(() => setMicState("idle"), 3000);
@@ -98,14 +106,18 @@ export function MicButton({
     setMicState("listening");
     cancelRef.current = listenOnce({
       lang,
+      maxMs: 6000,
       onResult: (t) => {
         const first = t.split(" | ")[0];
         setHeard(first);
         onTranscript(t);
+        setMicState("idle");
       },
       onError: (reason) => {
         console.warn("STT error:", reason);
+        // Don't show error for normal cases like timeout or no-speech
         setHeard(null);
+        setMicState("idle");
       },
       onEnd: () => setMicState("idle"),
     });
