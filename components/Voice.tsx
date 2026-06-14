@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import { narrate, type NarrationLang } from "@/lib/narrator";
 import { listenOnce, sttSupported, initVoice, requestMic } from "@/lib/voice";
 import { playTap } from "@/lib/sounds";
@@ -62,8 +63,15 @@ export function MicButton({
   const cancelRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    // initVoice probes availability + pre-warms the native plugin
-    initVoice().then(() => setSupported(sttSupported()));
+    // On native Android, always show the mic button — the native plugin
+    // handles recognition even if webkitSpeechRecognition is absent in WebView.
+    // On web, check synchronously.
+    if (Capacitor.isNativePlatform()) {
+      setSupported(true);
+      initVoice();
+    } else {
+      initVoice().then(() => setSupported(sttSupported()));
+    }
     return () => cancelRef.current();
   }, []);
 
