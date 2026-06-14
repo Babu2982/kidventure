@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { DebugOverlay } from "@/components/DebugOverlay";
 
 export const metadata: Metadata = {
   title: "KidVenture — Learn & Play",
@@ -41,6 +42,7 @@ export default function RootLayout({
       </head>
       <body className="font-body bg-cream min-h-dvh overscroll-none select-none">
         {children}
+        <DebugOverlay />
       </body>
     </html>
   );
