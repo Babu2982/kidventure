@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Capacitor } from "@capacitor/core";
+import { speak, initNativeTTS, stopSpeaking } from "@/lib/tts";
 
 type Result = { label: string; ok: boolean; detail: string };
 
@@ -145,8 +146,24 @@ export default function TTSTestPage() {
             {label}
           </button>
         ))}
-        <button onClick={() => { window.speechSynthesis.cancel(); addLog("cancel()"); }}
-          className="bg-red-50 rounded-xl px-4 py-3 text-left text-red-700">⏹ Stop</button>
+        <button onClick={async () => {
+          addLog("Testing NATIVE TTS plugin directly...");
+          if (Capacitor.isNativePlatform()) {
+            try {
+              await initNativeTTS();
+              addLog("Native TTS initialized");
+              speak("Hello from the native engine!", { lang: "en-US", onEnd: () => addLog("Native TTS onEnd fired") });
+              addLog("Native speak() called");
+            } catch(e: any) { addLog("Native TTS error: " + e.message); }
+          } else {
+            addLog("Not on native platform — using web TTS");
+            speak("Hello from web speech synthesis", { lang: "en-US", onEnd: () => addLog("Web TTS onEnd") });
+          }
+        }} className="bg-green-100 rounded-xl px-4 py-3 text-left text-green-800 font-semibold">
+          🤖 Test NATIVE TTS Plugin (bypasses WebView)
+        </button>
+        <button onClick={() => { stopSpeaking(); addLog("stopped"); }}
+          className="bg-red-50 rounded-xl px-4 py-3 text-left text-red-700">⏹ Stop (web)</button>
       </div>
 
       {/* Mic test */}

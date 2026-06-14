@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClientGate, TopBar } from "@/components/ui";
 import { narrate } from "@/lib/narrator";
-import { warmVoices } from "@/lib/tts";
+import { warmVoices, initNativeTTS } from "@/lib/tts";
 import { initVoice } from "@/lib/voice";
 import { useActiveProfile, useAppStore } from "@/store/useAppStore";
 import { playTap } from "@/lib/sounds";
@@ -64,6 +64,7 @@ function Dashboard() {
   // Warm up TTS + STT on the dashboard (safe: user just tapped a profile)
   useEffect(() => {
     warmVoices();
+    initNativeTTS(); // pre-warm Android TTS engine
     initVoice();
   }, []);
 
