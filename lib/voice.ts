@@ -6,7 +6,6 @@
  */
 
 import { Capacitor } from "@capacitor/core";
-import { dbg } from "@/lib/dbg";
 
 // Synchronous require() (same fix as tts.ts) — no hanging import promise,
 // no SSR execution since it only runs at call time.
@@ -43,9 +42,7 @@ export async function initVoice(): Promise<void> {
   try {
     const SpeechRecognition = SR_get();
     const a = await SpeechRecognition.available();
-    dbg(`STT available: ${JSON.stringify(a)}`);
   } catch (e: any) {
-    dbg(`initVoice ERROR: ${e?.message ?? e}`);
   }
 }
 
@@ -54,10 +51,8 @@ export async function requestMic(): Promise<boolean> {
   try {
     const SpeechRecognition = SR_get();
     const p = await SpeechRecognition.requestPermissions();
-    dbg(`requestMic: ${JSON.stringify(p)}`);
     return p.speechRecognition === "granted";
   } catch (e: any) {
-    dbg(`requestMic ERROR: ${e?.message ?? e}`);
     return false;
   }
 }
@@ -74,7 +69,6 @@ export function listenOnce(opts: ListenOpts): () => void {
 
   /* ---- NATIVE ---- */
   if (isNative()) {
-    dbg(`listenOnce native lang=${lang}`);
     let cancelled = false;
     let SpeechRecognition: any = null;
     let gotResult = false;
@@ -91,7 +85,6 @@ export function listenOnce(opts: ListenOpts): () => void {
     const deliver = (matches: string[], src: string) => {
       if (gotResult || cancelled) return;
       const best = matches.find((m) => m && m.trim()) || lastPartial;
-      dbg(`deliver(${src}): "${best}"`);
       if (best && best.trim()) {
         gotResult = true;
         clearTimeout(timeout);
@@ -109,14 +102,12 @@ export function listenOnce(opts: ListenOpts): () => void {
       clearTimeout(silenceTimer);
       silenceTimer = setTimeout(() => {
         if (!gotResult && !cancelled && lastPartial.trim()) {
-          dbg("silence finalize on partial");
           deliver([lastPartial], "silence-finalize");
         }
       }, 1800); // 1.8s after the last partial word heard
     };
 
     const timeout = setTimeout(() => {
-      dbg("listenOnce TIMEOUT");
       if (lastPartial.trim()) { deliver([lastPartial], "timeout-partial"); return; }
       clearTimeout(silenceTimer);
       removeListeners();
@@ -130,7 +121,6 @@ export function listenOnce(opts: ListenOpts): () => void {
         // Permission should already be granted from app-startup request,
         // but double-check (no-op if already granted, no dialog shown).
         const perm = await SpeechRecognition.requestPermissions();
-        dbg(`perm: ${JSON.stringify(perm)}`);
         if (perm.speechRecognition !== "granted") {
           clearTimeout(timeout);
           finish(() => onError?.("mic-denied"));
@@ -139,20 +129,17 @@ export function listenOnce(opts: ListenOpts): () => void {
         if (cancelled) return;
 
         // LISTENER-FIRST: register before start() so no event is missed.
-        dbg("registering listeners...");
         try { await SpeechRecognition.removeAllListeners(); } catch {}
 
         await SpeechRecognition.addListener("partialResults", (data: any) => {
           const m: string[] = Array.isArray(data?.matches) ? data.matches : [];
           if (m.length && m[0] && m[0].trim()) {
             lastPartial = m[0];
-            dbg(`partial: "${lastPartial}"`);
             armSilenceFinalize(); // each word resets the silence finalize
           }
         });
         await SpeechRecognition.addListener("listeningState", (data: any) => {
           const status = data?.status ?? JSON.stringify(data);
-          dbg(`listeningState: ${status}`);
           if (status === "stopped" && !gotResult && !cancelled) {
             // ended — deliver best partial if we have one
             if (lastPartial.trim()) deliver([lastPartial], "stopped-partial");
@@ -161,24 +148,29 @@ export function listenOnce(opts: ListenOpts): () => void {
         });
 
         if (cancelled) return;
-        dbg("calling start() (listener-driven, no await-react)...");
 
-        // Fire start(). We do NOT react to empty returns or retry —
-        // results flow through the partialResults listener above. We only
-        // use the resolved value if it happens to carry final matches.
+        // Popup mode: Google's "Speak now" voice UI. This is the one mode
+        // that reliably captures speech on Samsung WebView (inline returns
+        // empty). Returns final matches directly from start().
+        // NOTE: inline (popup:false) is a planned v2 enhancement pending a
+        // native STT plugin that works on this device's WebView.
         SpeechRecognition.start({
           language: lang,
           maxResults: 5,
-          partialResults: true,
-          popup: false,
+          partialResults: false,
+          popup: true,
         }).then((res: any) => {
           const m: string[] = Array.isArray(res?.matches) ? res.matches : [];
-          dbg(`start() resolved matches=${JSON.stringify(m).slice(0, 60)}`);
-          if (m.length) deliver(m, "start-final");
-          // If empty, do nothing — listener / silenceTimer / timeout handle it.
+          if (m.length && m[0]?.trim()) {
+            deliver(m, "popup-result");
+          } else if (!gotResult && !cancelled) {
+            clearTimeout(timeout);
+            clearTimeout(silenceTimer);
+            removeListeners();
+            finish(() => onError?.("no-speech"));
+          }
         }).catch((e: any) => {
           const msg = String(e?.message ?? e);
-          dbg(`start() error: ${msg}`);
           // On error, salvage any partial we heard; otherwise no-speech.
           if (!gotResult && !cancelled) {
             if (lastPartial.trim()) { deliver([lastPartial], "error-partial"); return; }
@@ -191,7 +183,6 @@ export function listenOnce(opts: ListenOpts): () => void {
       } catch (e: any) {
         clearTimeout(timeout);
         clearTimeout(silenceTimer);
-        dbg(`native STT setup ERROR: ${e?.message ?? e}`);
         if (!cancelled) finish(() => onError?.(String(e?.message ?? e)));
       }
     })();
@@ -208,11 +199,9 @@ export function listenOnce(opts: ListenOpts): () => void {
 
   /* ---- OLD NATIVE (disabled) ---- */
   if (false) {
-    dbg(`listenOnce native lang=${lang}`);
     let cancelled = false;
     let SpeechRecognition: any = null;
     const timeout = setTimeout(() => {
-      dbg("listenOnce TIMEOUT");
       SpeechRecognition?.stop().catch(() => {});
       finish(() => onError?.("timeout"));
     }, maxMs);
@@ -222,7 +211,6 @@ export function listenOnce(opts: ListenOpts): () => void {
         SpeechRecognition = SR_get();
         // permission
         const perm = await SpeechRecognition.requestPermissions();
-        dbg(`perm: ${JSON.stringify(perm)}`);
         if (perm.speechRecognition !== "granted") {
           clearTimeout(timeout);
           finish(() => onError?.("mic-denied"));
@@ -232,14 +220,12 @@ export function listenOnce(opts: ListenOpts): () => void {
         await new Promise((r) => setTimeout(r, 150));
         if (cancelled) return;
 
-        dbg("calling SpeechRecognition.start()...");
         const res: any = await SpeechRecognition.start({
           language: lang,
           maxResults: 3,
           partialResults: false,
           popup: false,
         });
-        dbg(`start() returned: ${JSON.stringify(res)}`);
         if (cancelled) return;
         clearTimeout(timeout);
         const matches: string[] = res?.matches ?? [];
@@ -251,7 +237,6 @@ export function listenOnce(opts: ListenOpts): () => void {
       } catch (e: any) {
         clearTimeout(timeout);
         const msg = String(e?.message ?? e);
-        dbg(`start() ERROR: ${msg}`);
         if (!cancelled) {
           if (msg.includes("aborted") || msg.includes("stop")) finish();
           else finish(() => onError?.(msg));

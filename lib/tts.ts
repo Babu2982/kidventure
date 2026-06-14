@@ -13,7 +13,6 @@
  */
 
 import { Capacitor } from "@capacitor/core";
-import { dbg } from "@/lib/dbg";
 
 // Synchronous require() inside a function. Unlike import(), require()
 // returns synchronously (no promise to hang in the WebView, which was
@@ -38,9 +37,7 @@ export async function initNativeTTS(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   try {
     const r = await TTS().getSupportedLanguages();
-    dbg(`initNativeTTS ok: ${(r as any)?.languages?.length ?? 0} langs`);
   } catch (e: any) {
-    dbg(`initNativeTTS ERROR: ${e?.message ?? e}`);
   }
 }
 
@@ -72,19 +69,13 @@ export function speak(
 
   /* ---- NATIVE ---- */
   if (Capacitor.isNativePlatform()) {
-    dbg(`speak() native START: "${text.slice(0, 25)}"`);
     (async () => {
       try {
-        dbg("getting TTS plugin (sync require)...");
         const t = TTS();
-        dbg(`TTS() = ${t ? "object" : "NULL"}, speak=${typeof t?.speak}`);
         try {
           await t.stop();
-          dbg("stop() ok");
         } catch (se: any) {
-          dbg(`stop() threw (ignoring): ${se?.message ?? se}`);
         }
-        dbg("calling t.speak() now...");
         const result = await t.speak({
           text,
           lang,
@@ -93,11 +84,9 @@ export function speak(
           volume: 1.0,
           category: "ambient",
         });
-        dbg(`speak() RESOLVED ✅ result=${JSON.stringify(result)}`);
         onEnd?.();
       } catch (e: any) {
         const msg = String(e?.message ?? e);
-        dbg(`speak() CAUGHT ERROR: ${msg}`);
         onEnd?.();
       }
     })();
@@ -140,13 +129,3 @@ export function warmVoices() {
 }
 
 
-/** Direct, minimal native speak for diagnostics — no store checks. */
-export async function directSpeak(text: string, lang = "en-US") {
-  if (!Capacitor.isNativePlatform()) {
-    window.speechSynthesis?.speak(new SpeechSynthesisUtterance(text));
-    return;
-  }
-  const t = TTS();
-  await t.stop().catch(() => {});
-  await t.speak({ text, lang, rate: 1.0, pitch: 1.0, volume: 1.0, category: "ambient" });
-}

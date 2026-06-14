@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClientGate, TopBar } from "@/components/ui";
 import { narrate } from "@/lib/narrator";
-import { warmVoices, initNativeTTS, directSpeak } from "@/lib/tts";
+import { warmVoices, initNativeTTS } from "@/lib/tts";
 import { initVoice, requestMic } from "@/lib/voice";
 import { useActiveProfile, useAppStore } from "@/store/useAppStore";
 import { playTap } from "@/lib/sounds";
@@ -103,21 +103,6 @@ function Dashboard() {
           </motion.button>
         )}
 
-        {/* DIRECT plugin test — bypasses narrate/speak entirely, calls
-            the TTS plugin exactly like the working debug page did. */}
-        <button
-          onClick={async () => {
-            try {
-              await directSpeak("Direct test. Can you hear me?");
-            } catch (e) {
-              console.error("direct test failed", e);
-            }
-          }}
-          className="bg-grass text-white rounded-2xl px-5 py-2 font-display text-sm"
-        >
-          🔧 Direct TTS test
-        </button>
-
         <div className="grid grid-cols-2 gap-4 sm:gap-6 w-full max-w-2xl">
           {ISLANDS.map((isle, i) => (
             <motion.button
@@ -173,21 +158,13 @@ function Dashboard() {
           </span>
         </motion.button>
 
-        <div className="flex gap-4">
-          <button
-            onClick={() => { setActiveProfile(null); router.push("/"); }}
-            className="font-body text-slate-400 underline underline-offset-4 py-2"
-            aria-label="Switch player"
-          >
-            🔄 Switch player
-          </button>
-          <button
-            onClick={() => router.push("/tts-test")}
-            className="font-body text-slate-300 underline underline-offset-4 py-2 text-xs"
-          >
-            🔬 Debug
-          </button>
-        </div>
+        <button
+          onClick={() => { setActiveProfile(null); router.push("/"); }}
+          className="font-body text-slate-400 underline underline-offset-4 py-2"
+          aria-label="Switch player"
+        >
+          🔄 Switch player
+        </button>
       </div>
     </main>
   );

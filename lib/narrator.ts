@@ -5,20 +5,18 @@ import { Capacitor } from "@capacitor/core";
 import { speak, stopSpeaking, ttsSupported, warmVoices } from "@/lib/tts";
 import { playRetry } from "@/lib/sounds";
 import { useGameStore } from "@/store/useGameStore";
-import { dbg } from "@/lib/dbg";
 
 export type NarrationLang = "en-US" | "hi-IN" | "kn-IN" | "ta-IN";
 
 function narrationEnabled(): boolean {
   const on = useGameStore.getState().narrationOn;
-  if (!on) { dbg("narrationEnabled: narrationOn=false"); return false; }
+  if (!on) return false;
   if (typeof window !== "undefined" && Capacitor.isNativePlatform()) return true;
   return ttsSupported();
 }
 
 export function narrate(text: string, lang: NarrationLang = "en-US") {
-  dbg(`narrate("${text.slice(0, 25)}")`);
-  if (!narrationEnabled() || !text) { dbg("narrate: blocked"); return; }
+  if (!narrationEnabled() || !text) return;
   speak(text, { lang, rate: 0.85 });
 }
 
