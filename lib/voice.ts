@@ -139,28 +139,33 @@ export function listenOnce(opts: ListenOpts): () => void {
         }
 
         dbg("calling start()...");
+        // Samsung's inline (popup:false) recognizer stops on silence in
+        // ~1s — too fast for a child to speak. popup:true uses Google's
+        // full-screen voice UI that waits properly and returns the final
+        // matches directly from start(). More reliable for kids.
         SpeechRecognition.start({
           language: lang,
           maxResults: 5,
-          partialResults: true,
-          popup: false,
+          partialResults: false,
+          popup: true,
         }).then((res: any) => {
-          // On Samsung, start() resolves immediately (often undefined) and
-          // the real result arrives later via the "results" listener.
-          // So we DON'T finish here on empty — we keep waiting for the
-          // listener (until timeout).
           const safe = res == null ? "undefined" : JSON.stringify(res);
-          dbg(`start() returned: ${safe.slice(0, 60)}`);
+          dbg(`start() returned: ${safe.slice(0, 80)}`);
           const matches: string[] = Array.isArray(res?.matches) ? res.matches : [];
-          if (matches.length) handleMatches(matches, "start-return");
-          // No else — keep listening via the event listeners.
+          if (matches.length) {
+            handleMatches(matches, "popup-result");
+          } else if (!gotResult && !cancelled) {
+            clearTimeout(timeout);
+            cleanup();
+            finish(() => onError?.("no-speech"));
+          }
         }).catch((e: any) => {
           const msg = String(e?.message ?? e);
           dbg(`start() error: ${msg}`);
           if (!gotResult && !cancelled) {
             clearTimeout(timeout);
             cleanup();
-            if (msg.includes("abort") || msg.includes("stop") || msg.includes("No match")) {
+            if (msg.includes("abort") || msg.includes("stop") || msg.includes("No match") || msg.includes("canceled")) {
               finish(() => onError?.("no-speech"));
             } else {
               finish(() => onError?.(msg));
