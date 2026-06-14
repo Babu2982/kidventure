@@ -35,7 +35,7 @@ export function SpeakButton({
 type MicState = "idle" | "listening" | "denied";
 
 export function MicButton({
-  lang = "en-US",
+  lang = "en-IN",
   onTranscript,
   prompt = "Tap to answer with your voice!",
   size = "md",

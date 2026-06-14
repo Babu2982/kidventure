@@ -63,7 +63,7 @@ export async function requestMic(): Promise<boolean> {
 }
 
 export function listenOnce(opts: ListenOpts): () => void {
-  const { lang = "en-US", onResult, onError, onEnd, maxMs = 12000 } = opts;
+  const { lang = "en-IN", onResult, onError, onEnd, maxMs = 12000 } = opts;
   let finished = false;
   const finish = (cb?: () => void) => {
     if (finished) return;
@@ -138,31 +138,48 @@ export function listenOnce(opts: ListenOpts): () => void {
           dbg(`addListener failed (ok): ${le?.message ?? le}`);
         }
 
-        dbg("calling start()...");
-        // Samsung's inline (popup:false) recognizer stops on silence in
-        // ~1s — too fast for a child to speak. popup:true uses Google's
-        // full-screen voice UI that waits properly and returns the final
-        // matches directly from start(). More reliable for kids.
-        SpeechRecognition.start({
-          language: lang,
-          maxResults: 5,
-          partialResults: false,
-          popup: true,
-        }).then((res: any) => {
-          const safe = res == null ? "undefined" : JSON.stringify(res);
-          dbg(`start() returned: ${safe.slice(0, 80)}`);
-          const matches: string[] = Array.isArray(res?.matches) ? res.matches : [];
-          if (matches.length) {
-            handleMatches(matches, "popup-result");
-          } else if (!gotResult && !cancelled) {
-            clearTimeout(timeout);
-            cleanup();
-            finish(() => onError?.("no-speech"));
-          }
-        }).catch((e: any) => {
-          const msg = String(e?.message ?? e);
-          dbg(`start() error: ${msg}`);
-          if (!gotResult && !cancelled) {
+        dbg("calling start() inline...");
+        // Inline recognition (no popup). Samsung's default silence cutoff
+        // is ~1s which is too short for a child. We pass Android
+        // SpeechRecognizer EXTRA_* timeouts to keep it listening longer.
+        // If the first attempt returns empty, we auto-retry once.
+        const startAttempt = (attempt: number) => {
+          dbg(`start() attempt ${attempt}`);
+          SpeechRecognition.start({
+            language: lang,
+            maxResults: 5,
+            partialResults: true,
+            popup: false,
+            // Android SpeechRecognizer extras (ms): keep listening through
+            // a child's natural pauses instead of cutting off instantly.
+            // The plugin forwards unknown keys to the recognizer intent.
+            silenceThreshold: 2500,
+            possiblyCompleteSilenceLength: 2500,
+            minimumLength: 3000,
+          } as any).then((res: any) => {
+            const safe = res == null ? "undefined" : JSON.stringify(res);
+            dbg(`start() returned: ${safe.slice(0, 80)}`);
+            const matches: string[] = Array.isArray(res?.matches) ? res.matches : [];
+            if (matches.length) {
+              handleMatches(matches, "inline-result");
+            } else if (attempt < 2 && !gotResult && !cancelled) {
+              dbg("empty result — retrying once");
+              setTimeout(() => { if (!gotResult && !cancelled) startAttempt(attempt + 1); }, 300);
+            } else if (!gotResult && !cancelled) {
+              clearTimeout(timeout);
+              cleanup();
+              finish(() => onError?.("no-speech"));
+            }
+          }).catch((e: any) => {
+            const msg = String(e?.message ?? e);
+            dbg(`start() error: ${msg}`);
+            if (gotResult || cancelled) return;
+            // "No match"/timeout on first try → retry once
+            if (attempt < 2 && (msg.includes("No match") || msg.includes("timeout") || msg.includes("7") || msg.includes("6"))) {
+              dbg("error — retrying once");
+              setTimeout(() => { if (!gotResult && !cancelled) startAttempt(attempt + 1); }, 300);
+              return;
+            }
             clearTimeout(timeout);
             cleanup();
             if (msg.includes("abort") || msg.includes("stop") || msg.includes("No match") || msg.includes("canceled")) {
@@ -170,8 +187,9 @@ export function listenOnce(opts: ListenOpts): () => void {
             } else {
               finish(() => onError?.(msg));
             }
-          }
-        });
+          });
+        };
+        startAttempt(1);
       } catch (e: any) {
         clearTimeout(timeout);
         dbg(`native STT setup ERROR: ${e?.message ?? e}`);
