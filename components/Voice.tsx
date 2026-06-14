@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { narrate, type NarrationLang } from "@/lib/narrator";
-import { listenOnce, sttSupported, initVoice, requestMic } from "@/lib/voice";
+import { listenOnce, sttSupported } from "@/lib/voice";
 import { playTap } from "@/lib/sounds";
 import { useGameStore } from "@/store/useGameStore";
 
@@ -32,19 +32,8 @@ export function SpeakButton({
   );
 }
 
-type MicState = "idle" | "requesting" | "listening" | "denied";
+type MicState = "idle" | "listening" | "denied";
 
-/**
- * MicButton — hands-free answering.
- *
- * On Android (native): uses @capacitor-community/speech-recognition.
- * On web (Chrome/Edge): uses webkitSpeechRecognition.
- * Hides entirely on platforms where neither is available (Firefox).
- *
- * First tap always requests mic permission explicitly so the Android
- * system dialog appears at a natural moment (when the child wants to
- * speak) rather than at app startup.
- */
 export function MicButton({
   lang = "en-US",
   onTranscript,
@@ -57,27 +46,22 @@ export function MicButton({
   size?: "md" | "lg";
 }) {
   const soundOn = useGameStore((s) => s.soundOn);
-  const [supported, setSupported] = useState(false);
   const [micState, setMicState] = useState<MicState>("idle");
   const [heard, setHeard] = useState<string | null>(null);
   const cancelRef = useRef<() => void>(() => {});
 
+  // Always show on native; probe web support on mount
+  const [show, setShow] = useState(Capacitor.isNativePlatform());
   useEffect(() => {
-    // On native Android, always show the mic button — the native plugin
-    // handles recognition even if webkitSpeechRecognition is absent in WebView.
-    // On web, check synchronously.
-    if (Capacitor.isNativePlatform()) {
-      setSupported(true);
-      initVoice();
-    } else {
-      initVoice().then(() => setSupported(sttSupported()));
+    if (!Capacitor.isNativePlatform()) {
+      setShow(sttSupported());
     }
     return () => cancelRef.current();
   }, []);
 
-  if (!supported) return null;
+  if (!show) return null;
 
-  const startListening = async () => {
+  const startListening = () => {
     if (micState === "listening") {
       cancelRef.current();
       setMicState("idle");
@@ -85,39 +69,21 @@ export function MicButton({
     }
     playTap(soundOn);
     setHeard(null);
-    setMicState("requesting");
+    setMicState("listening"); // go straight to listening — no "requesting" hang
 
-    // 5 second timeout on permission request — native dialog can hang
-    const permTimeout = setTimeout(() => {
-      if (micState === "requesting") {
-        setMicState("idle");
-      }
-    }, 5000);
-
-    const granted = await requestMic();
-    clearTimeout(permTimeout);
-
-    if (!granted) {
-      setMicState("denied");
-      setTimeout(() => setMicState("idle"), 3000);
-      return;
-    }
-
-    setMicState("listening");
     cancelRef.current = listenOnce({
       lang,
-      maxMs: 6000,
+      maxMs: 8000,
       onResult: (t) => {
         const first = t.split(" | ")[0];
         setHeard(first);
-        onTranscript(t);
         setMicState("idle");
+        onTranscript(t);
       },
       onError: (reason) => {
-        console.warn("STT error:", reason);
-        // Don't show error for normal cases like timeout or no-speech
-        setHeard(null);
-        setMicState("idle");
+        console.warn("STT:", reason);
+        if (reason === "mic-denied") setMicState("denied");
+        else setMicState("idle");
       },
       onEnd: () => setMicState("idle"),
     });
@@ -126,10 +92,9 @@ export function MicButton({
   const dim = size === "lg" ? "w-24 h-24 text-4xl" : "w-16 h-16 text-3xl";
 
   const statusText =
-    micState === "requesting" ? "Checking microphone…" :
-    micState === "listening"  ? "I'm listening… 👂" :
-    micState === "denied"     ? "Microphone not allowed 😔 (check Settings)" :
-    heard                     ? `Heard: "${heard}"` :
+    micState === "listening" ? "I'm listening… 👂" :
+    micState === "denied"    ? "Microphone blocked — check Settings" :
+    heard                    ? `Heard: "${heard}"` :
     prompt;
 
   return (
@@ -153,18 +118,13 @@ export function MicButton({
           animate={micState === "listening" ? { scale: [1, 1.08, 1] } : {}}
           transition={micState === "listening" ? { repeat: Infinity, duration: 0.9 } : {}}
           onClick={startListening}
-          disabled={micState === "requesting"}
-          aria-label={micState === "listening" ? "Listening… tap to stop" : "Answer with your voice"}
+          aria-label={micState === "listening" ? "Tap to stop" : "Answer with your voice"}
           aria-pressed={micState === "listening"}
           className={`relative ${dim} rounded-full shadow-chunky flex items-center justify-center
             ${micState === "listening" ? "bg-berry text-white" :
-              micState === "denied"    ? "bg-slate-300" :
-              "bg-white"}
-            disabled:opacity-50`}
+              micState === "denied"    ? "bg-slate-300" : "bg-white"}`}
         >
-          {micState === "listening" ? "🐰" :
-           micState === "requesting" ? "⏳" :
-           micState === "denied"     ? "🚫" : "🎤"}
+          {micState === "listening" ? "🐰" : micState === "denied" ? "🚫" : "🎤"}
         </motion.button>
       </div>
       <span className={`font-body text-xs text-center min-h-[1.5rem] max-w-[160px]

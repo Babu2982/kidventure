@@ -84,12 +84,16 @@ export function listenOnce(opts: ListenOpts): () => void {
       try {
         const sr = await getNativePlugin();
 
-        // Ensure permission
+        // Request permission if not already granted
         if (permissionGranted !== true) {
-          const perm = await sr.requestPermissions();
-          permissionGranted = perm.speechRecognition === "granted";
+          try {
+            const perm = await sr.requestPermissions();
+            permissionGranted = perm.speechRecognition === "granted";
+          } catch {
+            permissionGranted = true; // assume granted and try anyway
+          }
         }
-        if (!permissionGranted) {
+        if (permissionGranted === false) {
           clearTimeout(timeout);
           finish(() => onError?.("mic-denied"));
           return;
@@ -97,7 +101,7 @@ export function listenOnce(opts: ListenOpts): () => void {
 
         // Clean up any previous session
         try { await sr.stop(); } catch {}
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 150));
         if (cancelled) return;
 
         sr.start({

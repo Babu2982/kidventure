@@ -1,57 +1,44 @@
 "use client";
 
 /**
- * TTS engine — dual backend:
+ * TTS — dual backend.
  *
- *  NATIVE (Capacitor Android/iOS):
- *    @capacitor-community/text-to-speech → calls Android TTS Java API
- *    directly, bypassing the WebView sandbox. This is why Samsung
- *    WebView shows 0 voices while Chrome shows 92 — they use different
- *    TTS process contexts. The native plugin uses the SYSTEM TTS
- *    engine regardless of WebView, so it always works.
+ * NATIVE (Capacitor): @capacitor-community/text-to-speech
+ *   Calls Android TTS Java API directly. No gesture unlock needed.
+ *   No speechSynthesis used at all on native.
  *
- *  WEB (Chrome / Edge / Safari):
- *    Standard speechSynthesis API. Works fine in browsers.
- *
- * Both backends expose the same speak() / stopSpeaking() surface
- * so all calling code is unchanged.
+ * WEB (Chrome/Edge/Safari): speechSynthesis API.
  */
 
 import { Capacitor } from "@capacitor/core";
 
-let nativeTTS: any = null;
-let nativeTTSReady = false;
+let _nativeTTS: any = null;
 
 async function getNativeTTS() {
-  if (nativeTTS) return nativeTTS;
-  const mod = await import("@capacitor-community/text-to-speech");
-  nativeTTS = mod.TextToSpeech;
-  return nativeTTS;
+  if (_nativeTTS) return _nativeTTS;
+  const { TextToSpeech } = await import("@capacitor-community/text-to-speech");
+  _nativeTTS = TextToSpeech;
+  return _nativeTTS;
 }
 
-/** Initialize native TTS engine once at startup. */
+export function ttsSupported(): boolean {
+  if (Capacitor.isNativePlatform()) return true;
+  return typeof window !== "undefined" && "speechSynthesis" in window;
+}
+
 export async function initNativeTTS(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   try {
     const tts = await getNativeTTS();
-    // getSupportedLanguages warms up the engine
     await tts.getSupportedLanguages();
-    nativeTTSReady = true;
   } catch (e) {
-    console.warn("Native TTS init failed:", e);
+    console.warn("initNativeTTS:", e);
   }
-}
-
-export function ttsSupported(): boolean {
-  // On native Android/iOS we use the native TTS plugin — always supported
-  if (typeof window !== "undefined" && Capacitor.isNativePlatform()) return true;
-  // On web use speechSynthesis
-  return typeof window !== "undefined" && "speechSynthesis" in window;
 }
 
 export function stopSpeaking() {
   if (Capacitor.isNativePlatform()) {
-    getNativeTTS().then((tts) => tts.stop()).catch(() => {});
+    getNativeTTS().then((t: any) => t.stop()).catch(() => {});
     return;
   }
   if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -59,10 +46,6 @@ export function stopSpeaking() {
   }
 }
 
-/**
- * Speak text. On Android uses the native TTS plugin directly.
- * On web uses speechSynthesis with voice polling.
- */
 export function speak(
   text: string,
   {
@@ -79,80 +62,69 @@ export function speak(
 ): () => void {
   if (!text) { onEnd?.(); return () => {}; }
 
-  /* ---- Native path ---- */
+  /* ---- NATIVE path: direct Java TTS, no WebView sandbox ---- */
   if (Capacitor.isNativePlatform()) {
-    (async () => {
+    getNativeTTS().then(async (tts: any) => {
       try {
-        const tts = await getNativeTTS();
-        await tts.stop(); // cancel anything playing
+        await tts.stop();
         await tts.speak({
           text,
           lang,
-          rate: rate * 1.0,  // native rate is 0–2, same scale
+          rate: 1.0,
           pitch: 1.1,
           volume: 1.0,
           category: "ambient",
         });
         onEnd?.();
       } catch (e: any) {
-        // 'interrupted' = normal when stop() called mid-speech
-        if (!String(e?.message ?? e).includes("interrupted")) {
-          console.warn("Native TTS speak error:", e);
-        }
+        const msg = String(e?.message ?? e);
+        if (!msg.includes("interrupted")) console.warn("TTS speak:", msg);
         onEnd?.();
       }
-    })();
+    }).catch((e: any) => {
+      console.warn("TTS plugin load:", e);
+      onEnd?.();
+    });
     return () => stopSpeaking();
   }
 
-  /* ---- Web path ---- */
+  /* ---- WEB path: speechSynthesis ---- */
   if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-    onEnd?.();
-    return () => {};
+    onEnd?.(); return () => {};
   }
 
   window.speechSynthesis.cancel();
-
-  // Split long text at sentence boundaries (WebView 60s cutoff bug)
-  const chunks =
-    text.length > 150
-      ? (text.match(/[^.!?]+[.!?]*/g) ?? [text])
-      : [text];
+  const chunks = text.length > 150
+    ? (text.match(/[^.!?]+[.!?]*/g) ?? [text])
+    : [text];
 
   let idx = 0;
-  const speakNext = () => {
+  const next = () => {
     if (idx >= chunks.length) { onEnd?.(); return; }
     const chunk = chunks[idx++].trim();
-    if (!chunk) { speakNext(); return; }
+    if (!chunk) { next(); return; }
     const u = new SpeechSynthesisUtterance(chunk);
-    u.lang = lang;
-    u.rate = rate;
-    u.pitch = 1.05;
-    // Pick voice from cached list
+    u.lang = lang; u.rate = rate; u.pitch = 1.05;
     const voices = window.speechSynthesis.getVoices();
-    const voice =
-      voices.find((v) => v.lang === lang) ??
-      voices.find((v) => v.lang.startsWith(lang.split("-")[0]));
-    if (voice) u.voice = voice;
+    const v = voices.find((v) => v.lang === lang)
+      ?? voices.find((v) => v.lang.startsWith(lang.split("-")[0]));
+    if (v) u.voice = v;
     u.onboundary = (e) => { if (e.name === "word") onWord?.(e.charIndex); };
-    u.onend = speakNext;
+    u.onend = next;
     u.onerror = (e) => { if (e.error !== "interrupted") onEnd?.(); };
     window.speechSynthesis.speak(u);
   };
-  speakNext();
+  next();
   return () => window.speechSynthesis.cancel();
 }
 
-/** Warm up web voices (no-op on native). */
 export function warmVoices() {
   if (Capacitor.isNativePlatform()) {
-    // Warm up native engine instead
     initNativeTTS();
     return;
   }
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  const existing = window.speechSynthesis.getVoices();
-  if (existing.length > 0) return;
-  window.speechSynthesis.onvoiceschanged = () =>
-    window.speechSynthesis.getVoices();
+  const v = window.speechSynthesis.getVoices();
+  if (v.length > 0) return;
+  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
 }
