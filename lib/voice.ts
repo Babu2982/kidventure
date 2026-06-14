@@ -63,7 +63,7 @@ export async function requestMic(): Promise<boolean> {
 }
 
 export function listenOnce(opts: ListenOpts): () => void {
-  const { lang = "en-US", onResult, onError, onEnd, maxMs = 8000 } = opts;
+  const { lang = "en-US", onResult, onError, onEnd, maxMs = 12000 } = opts;
   let finished = false;
   const finish = (cb?: () => void) => {
     if (finished) return;
@@ -120,8 +120,19 @@ export function listenOnce(opts: ListenOpts): () => void {
           await SpeechRecognition.addListener("partialResults", (data: any) => {
             handleMatches(Array.isArray(data?.matches) ? data.matches : [], "partial");
           });
+          // Samsung fires the FINAL result on "results" (not partialResults)
+          await SpeechRecognition.addListener("results", (data: any) => {
+            handleMatches(Array.isArray(data?.matches) ? data.matches : [], "results");
+          });
           await SpeechRecognition.addListener("listeningState", (data: any) => {
-            dbg(`listeningState: ${data?.status ?? JSON.stringify(data)}`);
+            const status = data?.status ?? JSON.stringify(data);
+            dbg(`listeningState: ${status}`);
+            // When recognition STOPS with no result captured, finish gracefully
+            if (status === "stopped" && !gotResult && !cancelled) {
+              clearTimeout(timeout);
+              cleanup();
+              finish(() => onError?.("no-speech"));
+            }
           });
         } catch (le: any) {
           dbg(`addListener failed (ok): ${le?.message ?? le}`);
@@ -134,22 +145,15 @@ export function listenOnce(opts: ListenOpts): () => void {
           partialResults: true,
           popup: false,
         }).then((res: any) => {
-          // Guard: res may be undefined (Samsung delivers via listener)
+          // On Samsung, start() resolves immediately (often undefined) and
+          // the real result arrives later via the "results" listener.
+          // So we DON'T finish here on empty — we keep waiting for the
+          // listener (until timeout).
           const safe = res == null ? "undefined" : JSON.stringify(res);
           dbg(`start() returned: ${safe.slice(0, 60)}`);
           const matches: string[] = Array.isArray(res?.matches) ? res.matches : [];
-          handleMatches(matches, "start-return");
-          // If start resolved but no matches came anywhere, it means
-          // recognition ended with nothing — report no-speech (not crash)
-          if (!gotResult) {
-            setTimeout(() => {
-              if (!gotResult && !cancelled) {
-                clearTimeout(timeout);
-                cleanup();
-                finish(() => onError?.("no-speech"));
-              }
-            }, 1500);
-          }
+          if (matches.length) handleMatches(matches, "start-return");
+          // No else — keep listening via the event listeners.
         }).catch((e: any) => {
           const msg = String(e?.message ?? e);
           dbg(`start() error: ${msg}`);
