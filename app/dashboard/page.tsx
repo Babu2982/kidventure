@@ -43,6 +43,14 @@ const ISLANDS = [
     color: "bg-tangerine",
     float: 1.2,
   },
+  {
+    href: "/masterminds",
+    emoji: "🧠",
+    label: "Master Minds",
+    sub: "Flash & remember",
+    color: "bg-grape",
+    float: 1.6,
+  },
 ] as const;
 
 export default function DashboardPage() {
@@ -126,7 +134,8 @@ function Dashboard() {
               }}
               aria-label={isle.label}
               className={`${isle.color} rounded-[2.5rem] shadow-chunky p-6 sm:p-8
-                flex flex-col items-center gap-2 min-h-[160px] sm:min-h-[200px]`}
+                flex flex-col items-center gap-2 min-h-[160px] sm:min-h-[200px]
+                ${i === ISLANDS.length - 1 && ISLANDS.length % 2 === 1 ? "col-span-2 max-w-[calc(50%-0.5rem)] mx-auto" : ""}`}
             >
               <span className="text-6xl sm:text-7xl" aria-hidden>{isle.emoji}</span>
               <span className="font-display text-xl sm:text-2xl text-white drop-shadow">
