@@ -7,7 +7,7 @@
 // seen cards so a session is never empty. Speech routes through the native
 // narrate() layer (Samsung WebView returns 0 web voices — see project brief).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AnimatePresence,
   motion,
@@ -17,7 +17,7 @@ import {
   type PanInfo,
 } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { narrate, narrateCelebration } from '@/lib/narrator';
+import { narrate } from '@/lib/narrator';
 import { useGameStore } from '@/store/useGameStore';
 import { loadFlashcards, type Flashcard } from '@/lib/flashcards';
 import type { FlashcardState } from '@/lib/spacedRepetition';
@@ -161,11 +161,7 @@ export default function MasterMindsEngine({
     };
     setSummary(result);
     setPhase('summary');
-    try {
-      narrateCelebration?.();
-    } catch {
-      /* best-effort */
-    }
+    say('Great job! You finished your cards!');
     if (!reduceMotion) {
       confetti({ particleCount: 140, spread: 80, origin: { y: 0.6 } });
     }
