@@ -8,6 +8,9 @@
  *   - advancedMetrics: IGCSE-track progress (abacus, olympiad,
  *     Hindi/Kannada writing levels) and real-world sports badges
  *
+ * v4 adds the Master Minds spaced-repetition tracker (flashcardProgress),
+ * wired via createFlashcardSlice. Existing saved data upgrades in place.
+ *
  * Backward compatibility:
  *   - store/useAppStore.ts re-exports everything here, so all
  *     existing imports keep working.
@@ -19,6 +22,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { syncProfileToCloud } from "@/lib/supabase";
+import { createFlashcardSlice, type FlashcardSlice } from "./flashcardSlice";
 
 /* ---------- Types ---------- */
 
@@ -76,7 +80,7 @@ export interface ChildProfile {
   performance: PerformanceStats;
 }
 
-interface GameState {
+interface GameState extends FlashcardSlice {
   profiles: ChildProfile[];
   activeProfileId: string | null;
   soundOn: boolean;
@@ -378,10 +382,13 @@ export const useGameStore = create<GameState>()(
       unlockParentGate: () =>
         set({ parentUnlockedUntil: Date.now() + 5 * 60 * 1000 }),
       isParentUnlocked: () => Date.now() < get().parentUnlockedUntil,
+
+      /* ---- v4: Master Minds spaced-repetition tracker ---- */
+      ...createFlashcardSlice(set, get),
     }),
     {
       name: "kidsacademy-v1", // unchanged key so existing data migrates in place
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         profiles: s.profiles,
@@ -389,11 +396,16 @@ export const useGameStore = create<GameState>()(
         soundOn: s.soundOn,
         musicOn: s.musicOn,
         narrationOn: s.narrationOn,
+        flashcardProgress: s.flashcardProgress,
       }),
-      /** v1 → v2: add learningMode + advancedMetrics to saved profiles. */
+      /** v1 → v2: add learningMode + advancedMetrics to saved profiles.
+          v3 → v4: ensure flashcardProgress exists (lossless). */
       migrate: (persisted: any) => {
         if (persisted?.profiles) {
           persisted.profiles = persisted.profiles.map(normalizeProfile);
+        }
+        if (persisted && !persisted.flashcardProgress) {
+          persisted.flashcardProgress = {};
         }
         return persisted;
       },
@@ -402,6 +414,7 @@ export const useGameStore = create<GameState>()(
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         state.profiles = state.profiles.map(normalizeProfile);
+        if (!state.flashcardProgress) state.flashcardProgress = {};
       },
     }
   )
