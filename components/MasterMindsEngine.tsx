@@ -17,10 +17,22 @@ import {
   type PanInfo,
 } from 'framer-motion';
 import confetti from 'canvas-confetti';
+import { Capacitor } from '@capacitor/core';
 import { narrate } from '@/lib/narrator';
 import { useGameStore } from '@/store/useGameStore';
 import { loadFlashcards, type Flashcard } from '@/lib/flashcards';
 import type { FlashcardState } from '@/lib/spacedRepetition';
+
+// require() (NOT dynamic import()) — matches the project's established
+// native-plugin pattern. A dynamic import() promise hangs forever in the
+// Android WebView; require() only runs at call-time, guarded by the native
+// check below, so it never executes during SSR prerender either.
+let _CapApp: any = null;
+function CapApp() {
+  if (_CapApp) return _CapApp;
+  _CapApp = require('@capacitor/app').App;
+  return _CapApp;
+}
 
 // --- public API -------------------------------------------------------------
 export interface SessionSummary {
@@ -140,6 +152,27 @@ export default function MasterMindsEngine({
 
   const current = phase === 'play' ? pool[queue[index]] : undefined;
 
+  // Hardware back button (Android) closes this overlay instead of quitting
+  // the app — the expected behavior on every OEM. Guarded native-only.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let handle: { remove: () => void } | undefined;
+    let cancelled = false;
+    CapApp()
+      .addListener('backButton', () => onExit?.())
+      .then((h: { remove: () => void }) => {
+        if (cancelled) h.remove();
+        else handle = h;
+      })
+      .catch(() => {
+        /* listener registration is best-effort */
+      });
+    return () => {
+      cancelled = true;
+      handle?.remove();
+    };
+  }, [onExit]);
+
   // speak the prompt each time a new card appears
   useEffect(() => {
     if (current) say(current.say ?? current.concept);
@@ -211,7 +244,10 @@ export default function MasterMindsEngine({
       style={{ background: `linear-gradient(160deg, ${theme.from}, ${theme.to})` }}
     >
       {/* top bar */}
-      <div className="flex items-center gap-3 px-4 pt-5 pb-3">
+      <div
+        className="flex items-center gap-3 px-4 pb-3"
+        style={{ paddingTop: 'max(1.25rem, env(safe-area-inset-top))' }}
+      >
         <button
           onClick={onExit}
           aria-label="Close Master Minds"
@@ -343,7 +379,13 @@ export default function MasterMindsEngine({
 
       {/* grade controls — appear only after the answer is revealed */}
       {phase === 'play' && current && (
-        <div className="px-5 pb-7" style={{ visibility: flipped ? 'visible' : 'hidden' }}>
+        <div
+          className="px-5"
+          style={{
+            visibility: flipped ? 'visible' : 'hidden',
+            paddingBottom: 'max(1.75rem, env(safe-area-inset-bottom))',
+          }}
+        >
           <div className="mx-auto flex max-w-[420px] gap-3">
             <button
               onClick={() => grade('missed')}
