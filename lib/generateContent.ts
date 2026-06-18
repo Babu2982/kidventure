@@ -1,38 +1,40 @@
 // lib/generateContent.ts
-// SERVER-ONLY. Procedurally generates IGCSE-style math word problems and
-// logic patterns themed around a child's real-world interests, using
-// Google's Gemini API (free tier — no card required, see project notes),
-// then writes them into Supabase for later offline-cached reads.
+// SERVER-ONLY. Procedurally generates themed content for ALL FOUR content
+// tables (math, logic, flashcards, stories) using Google's free Gemini API,
+// then writes valid rows into Supabase. One call now fills the whole
+// pipeline instead of just two tables.
 //
-// This file must only be called from a Route Handler (see
-// app/api/content/generate/route.ts). It is never imported by any
-// 'use client' component and never ships inside the Android APK — the
-// app only ever READS generated rows via lib/flashcards.ts-style loaders.
+// Called only from app/api/content/generate/route.ts (Vercel server only —
+// never reachable from, or bundled into, the Android APK).
 //
 // Env required (Vercel dashboard):
-//   GEMINI_API_KEY            — from aistudio.google.com, free, no card
-//   SUPABASE_SERVICE_ROLE_KEY — used indirectly via lib/supabaseAdmin.ts
+//   GEMINI_API_KEY            — free, from aistudio.google.com
+//   SUPABASE_SERVICE_ROLE_KEY
 //   NEXT_PUBLIC_SUPABASE_URL
 //
 // IMPORTANT: never enable billing on the Google Cloud project tied to this
-// key. The Gemini free tier disappears entirely the moment billing is
-// turned on for that project — every call becomes paid from then on.
+// key — the Gemini free tier disappears entirely the moment billing is
+// turned on for that project.
 
 import { supabaseAdmin } from './supabaseAdmin';
 
 export interface GenerateContentOptions {
   /** Child's current adaptive skill ceiling (1–20), drives difficulty. */
   skillCeiling: number;
-  /** Real-world interests to theme problems around, e.g. ['badminton','swimming']. */
+  /** Real-world interests to theme content around, e.g. ['badminton','swimming']. */
   themes: string[];
   mode?: 'junior' | 'advanced';
   mathCount?: number; // default 5
   logicCount?: number; // default 5
+  flashcardCount?: number; // default 6
+  storyCount?: number; // default 1 (stories are longer; keep batches small)
 }
 
 export interface GenerateContentResult {
   mathInserted: number;
   logicInserted: number;
+  flashcardsInserted: number;
+  storiesInserted: number;
   errors: string[];
 }
 
@@ -50,14 +52,37 @@ interface RawLogicPattern {
   theme_tags: string[];
 }
 
-// Configurable via env so a future Gemini model-name change never needs a
-// code edit — just update GEMINI_MODEL in Vercel.
+interface RawFlashcard {
+  deck: string;
+  concept: string;
+  detail: string;
+  emoji?: string;
+  theme_tags: string[];
+}
+
+interface RawStory {
+  title: string;
+  body: string;
+  mind_map_prompt: string;
+  comprehension_question: string;
+  answer_keywords: string[];
+  theme_tags: string[];
+}
+
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
-function buildPrompt(opts: Required<Omit<GenerateContentOptions, 'mode'>> & { mode: string }): string {
+function buildPrompt(opts: {
+  skillCeiling: number;
+  themes: string[];
+  mode: string;
+  mathCount: number;
+  logicCount: number;
+  flashcardCount: number;
+  storyCount: number;
+}): string {
   return `Generate children's educational content for an IGCSE-track learning app.
 Child's skill level: ${opts.skillCeiling} (1=baseline, higher=harder).
-Theme the content around these real-world interests: ${opts.themes.join(', ') || 'general school life'}.
+Theme the content around these real-world interests where natural: ${opts.themes.join(', ') || 'general school life'}.
 Mode: ${opts.mode}.
 
 Return EXACTLY this JSON shape and nothing else:
@@ -65,24 +90,43 @@ Return EXACTLY this JSON shape and nothing else:
 {
   "math_problems": [
     {
-      "template": "string with {a} and {b} placeholders, themed around the interests, age-appropriate, one or two sentences",
+      "template": "string with {a} and {b} placeholders, themed, age-appropriate, one or two sentences",
       "variables": { "a": { "min": number, "max": number }, "b": { "min": number, "max": number } },
-      "answer_formula": "a simple arithmetic expression using a and b, e.g. \\"a*b\\" or \\"a+b\\"",
-      "theme_tags": ["lowercase-tag", "..."]
+      "answer_formula": "simple arithmetic expression using a and b, e.g. \\"a*b\\" or \\"a+b\\"",
+      "theme_tags": ["lowercase-tag"]
     }
   ],
   "logic_patterns": [
     {
-      "sequence": [number_or_string, number_or_string, "..."],
+      "sequence": [number_or_string, "..."],
       "answer": number_or_string,
       "distractors": [number_or_string, number_or_string, number_or_string],
-      "theme_tags": ["lowercase-tag", "..."]
+      "theme_tags": ["lowercase-tag"]
+    }
+  ],
+  "flashcards": [
+    {
+      "deck": "one short lowercase category name, e.g. geography, science, multiplication, vocabulary",
+      "concept": "short prompt shown on the front of the card, a few words",
+      "detail": "the answer shown on the back, a few words",
+      "emoji": "one single emoji that visually represents the concept",
+      "theme_tags": ["lowercase-tag"]
+    }
+  ],
+  "stories": [
+    {
+      "title": "short story title",
+      "body": "a simple, encouraging 80-150 word story appropriate for a 6-10 year old, optionally touching the themes",
+      "mind_map_prompt": "one sentence prompting the child to draw or map the core idea of the story",
+      "comprehension_question": "one simple spoken question about the story's content",
+      "answer_keywords": ["lowercase-keyword", "..."],
+      "theme_tags": ["lowercase-tag"]
     }
   ]
 }
 
-Generate exactly ${opts.mathCount} math_problems and exactly ${opts.logicCount} logic_patterns.
-Keep language simple, encouraging, and appropriate for a child aged 6-10. Never include violent, scary, or adult themes.`;
+Generate exactly ${opts.mathCount} math_problems, ${opts.logicCount} logic_patterns, ${opts.flashcardCount} flashcards, and ${opts.storyCount} stories.
+Keep all language simple, encouraging, and age-appropriate for 6-10 year olds. Never include violent, scary, sad, or adult themes. Stories must have a positive, gentle tone.`;
 }
 
 function stripFences(text: string): string {
@@ -111,17 +155,48 @@ function isValidLogicPattern(p: any): p is RawLogicPattern {
   );
 }
 
+function isValidFlashcard(p: any): p is RawFlashcard {
+  return (
+    p &&
+    typeof p.deck === 'string' &&
+    p.deck.length > 0 &&
+    typeof p.concept === 'string' &&
+    p.concept.length > 0 &&
+    typeof p.detail === 'string' &&
+    Array.isArray(p.theme_tags)
+  );
+}
+
+function isValidStory(p: any): p is RawStory {
+  return (
+    p &&
+    typeof p.title === 'string' &&
+    p.title.length > 0 &&
+    typeof p.body === 'string' &&
+    p.body.length > 20 &&
+    typeof p.comprehension_question === 'string' &&
+    Array.isArray(p.answer_keywords) &&
+    Array.isArray(p.theme_tags)
+  );
+}
+
 /**
- * Calls the Gemini API (free tier) to procedurally generate themed math +
- * logic content, then writes valid rows into Supabase (source: 'generated').
- * Never throws — collects problems into `errors` so a bad generation never
- * crashes the route.
+ * Calls the Gemini API (free tier) to procedurally generate themed content
+ * across all four content tables, then writes valid rows into Supabase
+ * (source: 'generated'). Never throws — problems are collected into
+ * `errors` so one bad batch never crashes the route or blocks the others.
  */
 export async function generateThemedContent(
   opts: GenerateContentOptions,
 ): Promise<GenerateContentResult> {
   const errors: string[] = [];
-  const result: GenerateContentResult = { mathInserted: 0, logicInserted: 0, errors };
+  const result: GenerateContentResult = {
+    mathInserted: 0,
+    logicInserted: 0,
+    flashcardsInserted: 0,
+    storiesInserted: 0,
+    errors,
+  };
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -136,9 +211,17 @@ export async function generateThemedContent(
   const mode = opts.mode ?? 'advanced';
   const mathCount = opts.mathCount ?? 5;
   const logicCount = opts.logicCount ?? 5;
+  const flashcardCount = opts.flashcardCount ?? 6;
+  const storyCount = opts.storyCount ?? 1;
   const skillCeiling = Math.min(20, Math.max(1, Math.round(opts.skillCeiling)));
 
-  let raw: { math_problems?: unknown[]; logic_patterns?: unknown[] };
+  let raw: {
+    math_problems?: unknown[];
+    logic_patterns?: unknown[];
+    flashcards?: unknown[];
+    stories?: unknown[];
+  };
+
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
@@ -149,11 +232,22 @@ export async function generateThemedContent(
           contents: [
             {
               role: 'user',
-              parts: [{ text: buildPrompt({ skillCeiling, themes: opts.themes, mode, mathCount, logicCount }) }],
+              parts: [
+                {
+                  text: buildPrompt({
+                    skillCeiling,
+                    themes: opts.themes,
+                    mode,
+                    mathCount,
+                    logicCount,
+                    flashcardCount,
+                    storyCount,
+                  }),
+                },
+              ],
             },
           ],
           generationConfig: {
-            // Forces valid JSON back — far more reliable than prompting alone.
             responseMimeType: 'application/json',
             temperature: 0.9,
           },
@@ -175,8 +269,6 @@ export async function generateThemedContent(
     }
     if (candidate.finishReason && candidate.finishReason !== 'STOP') {
       errors.push(`Gemini stopped early: ${candidate.finishReason}`);
-      // Some early-stop reasons (e.g. MAX_TOKENS) may still have partial usable text below;
-      // continue rather than returning, but the parse step will catch genuinely bad output.
     }
 
     const text: string | undefined = candidate?.content?.parts?.[0]?.text;
@@ -204,16 +296,13 @@ export async function generateThemedContent(
       theme_tags: p.theme_tags,
       source: 'generated' as const,
     }));
-
   if (mathRows.length) {
-    const { error, count } = await supabaseAdmin
-      .from('math_problem_templates')
-      .insert(mathRows, { count: 'exact' });
+    const { error, count } = await supabaseAdmin.from('math_problem_templates').insert(mathRows, { count: 'exact' });
     if (error) errors.push(`math insert failed: ${error.message}`);
     else result.mathInserted = count ?? mathRows.length;
   }
 
-  // --- logic_patterns ------------------------------------------------------
+  // --- logic_patterns ----------------------------------------------------
   const logicRows = (raw.logic_patterns ?? [])
     .filter(isValidLogicPattern)
     .map((p) => ({
@@ -226,13 +315,50 @@ export async function generateThemedContent(
       theme_tags: p.theme_tags,
       source: 'generated' as const,
     }));
-
   if (logicRows.length) {
-    const { error, count } = await supabaseAdmin
-      .from('logic_patterns')
-      .insert(logicRows, { count: 'exact' });
+    const { error, count } = await supabaseAdmin.from('logic_patterns').insert(logicRows, { count: 'exact' });
     if (error) errors.push(`logic insert failed: ${error.message}`);
     else result.logicInserted = count ?? logicRows.length;
+  }
+
+  // --- flashcards ----------------------------------------------------------
+  const flashcardRows = (raw.flashcards ?? [])
+    .filter(isValidFlashcard)
+    .map((p) => ({
+      deck: p.deck,
+      mode,
+      skill_level: skillCeiling,
+      concept: p.concept,
+      detail: p.detail,
+      emoji: p.emoji ?? null,
+      theme_tags: p.theme_tags,
+      source: 'generated' as const,
+    }));
+  if (flashcardRows.length) {
+    const { error, count } = await supabaseAdmin.from('flashcards').insert(flashcardRows, { count: 'exact' });
+    if (error) errors.push(`flashcards insert failed: ${error.message}`);
+    else result.flashcardsInserted = count ?? flashcardRows.length;
+  }
+
+  // --- educational_stories -------------------------------------------------
+  const storyRows = (raw.stories ?? [])
+    .filter(isValidStory)
+    .map((p) => ({
+      title: p.title,
+      language: 'en' as const,
+      mode,
+      skill_level: skillCeiling,
+      body: p.body,
+      mind_map_prompt: p.mind_map_prompt ?? null,
+      comprehension_question: p.comprehension_question,
+      answer_keywords: p.answer_keywords,
+      theme_tags: p.theme_tags,
+      source: 'generated' as const,
+    }));
+  if (storyRows.length) {
+    const { error, count } = await supabaseAdmin.from('educational_stories').insert(storyRows, { count: 'exact' });
+    if (error) errors.push(`stories insert failed: ${error.message}`);
+    else result.storiesInserted = count ?? storyRows.length;
   }
 
   return result;

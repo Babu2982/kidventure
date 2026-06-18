@@ -1,22 +1,20 @@
 // app/api/content/generate/route.ts
-// Web-only Route Handler (Vercel). This endpoint does NOT exist inside the
-// Android APK — Capacitor's static export has no server, so this route is
-// only ever reachable at kidsventure.vercel.app. The APK never calls it; it
-// only reads the rows this route writes, via the existing Supabase-direct
-// loaders (see lib/flashcards.ts pattern).
+// Web-only Route Handler (Vercel). Does NOT exist inside the Android APK —
+// the app only ever reads what this route writes, via the Supabase-direct
+// loaders (lib/flashcards.ts, lib/dynamicContent.ts).
 //
-// Gated by a shared secret so randoms can't burn your Claude API budget.
-// Trigger manually (e.g. from your own browser, Postman, or a future parent
-// dashboard button) with:
-//
+// Trigger manually:
 //   POST https://kidsventure.vercel.app/api/content/generate
 //   Header: x-admin-secret: <CONTENT_ADMIN_SECRET>
-//   Body: { "skillCeiling": 2, "themes": ["badminton","swimming"], "mode": "advanced" }
+//   Body: {
+//     "skillCeiling": 2,
+//     "themes": ["badminton","swimming"],
+//     "mode": "advanced",
+//     "mathCount": 5, "logicCount": 5, "flashcardCount": 6, "storyCount": 1
+//   }
 //
 // Env required (Vercel dashboard):
-//   CONTENT_ADMIN_SECRET   (pick any long random string yourself)
-//   ANTHROPIC_API_KEY
-//   SUPABASE_SERVICE_ROLE_KEY
+//   CONTENT_ADMIN_SECRET, GEMINI_API_KEY, SUPABASE_SERVICE_ROLE_KEY,
 //   NEXT_PUBLIC_SUPABASE_URL
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -57,6 +55,8 @@ export async function POST(req: NextRequest) {
     mode,
     mathCount: Number(body?.mathCount) || 5,
     logicCount: Number(body?.logicCount) || 5,
+    flashcardCount: Number(body?.flashcardCount) || 6,
+    storyCount: Number(body?.storyCount) || 1,
   });
 
   return NextResponse.json(result, { status: result.errors.length ? 207 : 200 });
