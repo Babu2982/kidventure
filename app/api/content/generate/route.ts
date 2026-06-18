@@ -53,10 +53,10 @@ export async function POST(req: NextRequest) {
     skillCeiling,
     themes,
     mode,
-    mathCount: Number(body?.mathCount) || 5,
-    logicCount: Number(body?.logicCount) || 5,
-    flashcardCount: Number(body?.flashcardCount) || 6,
-    storyCount: Number(body?.storyCount) || 1,
+    mathCount: Number(body?.mathCount) || 20,
+    logicCount: Number(body?.logicCount) || 20,
+    flashcardCount: Number(body?.flashcardCount) || 25,
+    storyCount: Number(body?.storyCount) || 3,
   });
 
   return NextResponse.json(result, { status: result.errors.length ? 207 : 200 });

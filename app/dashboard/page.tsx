@@ -51,6 +51,14 @@ const ISLANDS = [
     color: "bg-grape",
     float: 1.6,
   },
+  {
+    href: "/brainboost",
+    emoji: "🚀",
+    label: "Brain Boost",
+    sub: "Practice & play",
+    color: "bg-emerald-500",
+    float: 2.0,
+  },
 ] as const;
 
 export default function DashboardPage() {

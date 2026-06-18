@@ -24,10 +24,10 @@ export interface GenerateContentOptions {
   /** Real-world interests to theme content around, e.g. ['badminton','swimming']. */
   themes: string[];
   mode?: 'junior' | 'advanced';
-  mathCount?: number; // default 5
-  logicCount?: number; // default 5
-  flashcardCount?: number; // default 6
-  storyCount?: number; // default 1 (stories are longer; keep batches small)
+  mathCount?: number; // default 20
+  logicCount?: number; // default 20
+  flashcardCount?: number; // default 25
+  storyCount?: number; // default 3
 }
 
 export interface GenerateContentResult {
@@ -126,6 +126,7 @@ Return EXACTLY this JSON shape and nothing else:
 }
 
 Generate exactly ${opts.mathCount} math_problems, ${opts.logicCount} logic_patterns, ${opts.flashcardCount} flashcards, and ${opts.storyCount} stories.
+CRITICAL VARIETY REQUIREMENT: every item within each category must use a genuinely different real-world scenario, setting, and sentence structure from every other item in that category — do not just swap numbers or names in the same sentence template. Spread flashcards across multiple decks (e.g. multiplication, geography, science, animals, space, vocabulary) rather than repeating one deck. Spread math problems across different operations (addition, subtraction, multiplication, division) and different everyday situations (shopping, sports, cooking, travel, school, nature).
 Keep all language simple, encouraging, and age-appropriate for 6-10 year olds. Never include violent, scary, sad, or adult themes. Stories must have a positive, gentle tone.`;
 }
 
@@ -209,10 +210,10 @@ export async function generateThemedContent(
   }
 
   const mode = opts.mode ?? 'advanced';
-  const mathCount = opts.mathCount ?? 5;
-  const logicCount = opts.logicCount ?? 5;
-  const flashcardCount = opts.flashcardCount ?? 6;
-  const storyCount = opts.storyCount ?? 1;
+  const mathCount = opts.mathCount ?? 20;
+  const logicCount = opts.logicCount ?? 20;
+  const flashcardCount = opts.flashcardCount ?? 25;
+  const storyCount = opts.storyCount ?? 3;
   const skillCeiling = Math.min(20, Math.max(1, Math.round(opts.skillCeiling)));
 
   let raw: {
@@ -249,7 +250,8 @@ export async function generateThemedContent(
           ],
           generationConfig: {
             responseMimeType: 'application/json',
-            temperature: 0.9,
+            temperature: 0.95,
+            maxOutputTokens: 8192,
           },
         }),
       },
