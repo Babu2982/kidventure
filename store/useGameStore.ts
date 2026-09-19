@@ -3,26 +3,23 @@
 /**
  * useGameStore — the app's single source of truth.
  *
- * v2 adds dual learning modes on top of the v1 schema:
- *   - learningMode: 'junior' | 'advanced' per child profile
- *   - advancedMetrics: IGCSE-track progress (abacus, olympiad,
- *     Hindi/Kannada writing levels) and real-world sports badges
- *
- * v4 adds the Master Minds spaced-repetition tracker (flashcardProgress),
- * wired via createFlashcardSlice. Existing saved data upgrades in place.
+ * v2 adds dual learning modes on top of the v1 schema.
+ * v3 adds adaptive difficulty (PerformanceStats).
+ * v4 adds Master Minds spaced-repetition tracker (flashcardProgress).
+ * v5 adds SMC Olympiad progress tracker (olympiadProgress).
  *
  * Backward compatibility:
  *   - store/useAppStore.ts re-exports everything here, so all
  *     existing imports keep working.
- *   - The persist `migrate` function upgrades v1 profiles already
- *     saved in localStorage (adds learningMode + advancedMetrics
- *     with safe defaults). No data is lost on update.
+ *   - The persist `migrate` function upgrades saved data with safe
+ *     defaults at every version bump. No data is ever lost.
  */
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { syncProfileToCloud } from "@/lib/supabase";
 import { createFlashcardSlice, type FlashcardSlice } from "./flashcardSlice";
+import { createOlympiadSlice, type OlympiadSlice } from "./olympiadSlice";
 
 /* ---------- Types ---------- */
 
@@ -50,18 +47,18 @@ export interface PerformanceStats {
   totalAnswers: number;
   totalCorrect: number;
   totalTimeMs: number;
-  averageTimePerAnswer: number; // ms
+  averageTimePerAnswer: number;
   currentSkillCeiling: number;  // 1 (baseline) | 2 (intermediate) | 3 (olympiad)
   recentResults: boolean[];     // rolling window of the last 5 answers
 }
 
 export interface AdvancedMetrics {
-  currentHindiLevel: number;   // index into the Hindi varnamala track
-  currentKannadaLevel: number; // index into the Kannada aksharamale track
-  abacusScore: number;         // cumulative correct abacus answers
-  olympiadLevel: number;       // 1+ — scales word-problem difficulty
-  sportsBadges: number;        // total activities logged
-  sportsLog: SportsLogEntry[]; // diary entries (Athlete's Diary)
+  currentHindiLevel: number;
+  currentKannadaLevel: number;
+  abacusScore: number;
+  olympiadLevel: number;
+  sportsBadges: number;
+  sportsLog: SportsLogEntry[];
 }
 
 export interface ChildProfile {
@@ -80,7 +77,7 @@ export interface ChildProfile {
   performance: PerformanceStats;
 }
 
-interface GameState extends FlashcardSlice {
+interface GameState extends FlashcardSlice, OlympiadSlice {
   profiles: ChildProfile[];
   activeProfileId: string | null;
   soundOn: boolean;
@@ -179,7 +176,7 @@ export const defaultAdvancedMetrics = (): AdvancedMetrics => ({
   sportsLog: [],
 });
 
-/** Upgrade any v1 profile (or partially-formed object) to the v2 shape. */
+/** Upgrade any v1 profile (or partially-formed object) to the full shape. */
 function normalizeProfile(p: any): ChildProfile {
   return {
     id: p.id ?? uid(),
@@ -319,11 +316,7 @@ export const useGameStore = create<GameState>()(
           }),
         })),
 
-      /* ---- v3: adaptive difficulty engine ----
-         Streak of 5 correct  -> level up (max 3), streak resets.
-         Accuracy < 60% over the last 5 answers -> gentle step back
-         down (min 1) and the window clears so confidence can rebuild
-         at the easier level before another adjustment. */
+      /* ---- v3: adaptive difficulty engine ---- */
       recordAnswer: (correct, timeMs) => {
         let levelChange: -1 | 0 | 1 = 0;
         let newLevel = 1;
@@ -385,10 +378,13 @@ export const useGameStore = create<GameState>()(
 
       /* ---- v4: Master Minds spaced-repetition tracker ---- */
       ...createFlashcardSlice(set, get),
+
+      /* ---- v5: SMC Olympiad progress tracker ---- */
+      ...createOlympiadSlice(set, get),
     }),
     {
-      name: "kidsacademy-v1", // unchanged key so existing data migrates in place
-      version: 4,
+      name: "kidsacademy-v1", // unchanged key — existing saves migrate in place
+      version: 5,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         profiles: s.profiles,
@@ -397,24 +393,32 @@ export const useGameStore = create<GameState>()(
         musicOn: s.musicOn,
         narrationOn: s.narrationOn,
         flashcardProgress: s.flashcardProgress,
+        olympiadProgress: s.olympiadProgress,
       }),
-      /** v1 → v2: add learningMode + advancedMetrics to saved profiles.
-          v3 → v4: ensure flashcardProgress exists (lossless). */
+      /**
+       * Lossless migrations:
+       * v1→v2: add learningMode + advancedMetrics to profiles.
+       * v3→v4: ensure flashcardProgress exists.
+       * v4→v5: ensure olympiadProgress exists.
+       */
       migrate: (persisted: any) => {
         if (persisted?.profiles) {
           persisted.profiles = persisted.profiles.map(normalizeProfile);
         }
-        if (persisted && !persisted.flashcardProgress) {
+        if (!persisted.flashcardProgress) {
           persisted.flashcardProgress = {};
+        }
+        if (!persisted.olympiadProgress) {
+          persisted.olympiadProgress = {};
         }
         return persisted;
       },
-      /** Belt-and-braces: normalize after every rehydrate, covering
-          profiles written by mixed app versions. */
+      /** Belt-and-braces: normalise after every rehydrate. */
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         state.profiles = state.profiles.map(normalizeProfile);
         if (!state.flashcardProgress) state.flashcardProgress = {};
+        if (!state.olympiadProgress)  state.olympiadProgress = {};
       },
     }
   )
@@ -423,7 +427,7 @@ export const useGameStore = create<GameState>()(
 export const useActiveProfile = () =>
   useGameStore((s) => s.profiles.find((p) => p.id === s.activeProfileId) ?? null);
 
-/** Convenience: current child's mode ('junior' when no profile). */
+/** Current child's learning mode ('junior' when no profile). */
 export const useLearningMode = (): LearningMode =>
   useGameStore(
     (s) =>
