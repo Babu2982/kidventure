@@ -53,7 +53,7 @@ foreach ($b in $themes) {
     skillCeiling   = $b.skillCeiling
     themes         = $b.themes
     mode           = "advanced"
-    mathCount      = 8
+    mathCount      = 5
     logicCount     = 8
     flashcardCount = 0
     storyCount     = 0
@@ -66,7 +66,7 @@ foreach ($b in $themes) {
     mode           = "advanced"
     mathCount      = 0
     logicCount     = 0
-    flashcardCount = 10
+    flashcardCount = 6
     storyCount     = 0
   }
 

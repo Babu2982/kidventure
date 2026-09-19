@@ -59,6 +59,14 @@ const ISLANDS = [
     color: "bg-emerald-500",
     float: 2.0,
   },
+  {
+    href: "/olympiad",
+    emoji: "🏆",
+    label: "SMC Olympiad",
+    sub: "Singapore Math Prep",
+    color: "bg-amber-500",
+    float: 2.4,
+  },
 ] as const;
 
 export default function DashboardPage() {
@@ -73,18 +81,13 @@ function Dashboard() {
   const router = useRouter();
   const profile = useActiveProfile()!;
   const soundOn = useAppStore((s) => s.soundOn);
-  const narrationOn = useAppStore((s) => s.narrationOn);
   const setActiveProfile = useAppStore((s) => s.setActiveProfile);
   const [greeted, setGreeted] = useState(false);
 
-  // Warm up TTS + STT on the dashboard (safe: user just tapped a profile)
   useEffect(() => {
     warmVoices();
-    initNativeTTS(); // pre-warm Android TTS engine
+    initNativeTTS();
     initVoice();
-    // Request mic permission once, early — so the system dialog appears
-    // here (a calm moment) instead of mid-game. Granted once, never asked
-    // again. Android requires a user dialog the first time regardless.
     requestMic().catch(() => {});
   }, []);
 
@@ -92,8 +95,6 @@ function Dashboard() {
 
   const handleGreet = () => {
     setGreeted(true);
-    // Force narration ON so the greeting always speaks, regardless of
-    // any earlier accidental toggle of the 🗣️ button.
     if (!useAppStore.getState().narrationOn) toggleNarration();
     setTimeout(() => {
       narrate(`Hi ${profile.name}! Pick an island to start learning!`);
@@ -105,7 +106,6 @@ function Dashboard() {
       <TopBar title={`Hi, ${profile.name}!`} emoji={profile.avatar} />
 
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-5 pb-6">
-        {/* First-gesture button — forces narration on + speaks greeting */}
         {!greeted && (
           <motion.button
             initial={{ opacity: 0, y: -10 }}
@@ -154,7 +154,6 @@ function Dashboard() {
           ))}
         </div>
 
-        {/* The Suitcase — sticker collection */}
         <motion.button
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
