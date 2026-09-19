@@ -1,33 +1,18 @@
 // lib/generateContent.ts
-// SERVER-ONLY. Procedurally generates themed content for ALL FOUR content
-// tables (math, logic, flashcards, stories) using Google's free Gemini API,
-// then writes valid rows into Supabase. One call now fills the whole
-// pipeline instead of just two tables.
-//
-// Called only from app/api/content/generate/route.ts (Vercel server only —
-// never reachable from, or bundled into, the Android APK).
-//
-// Env required (Vercel dashboard):
-//   GEMINI_API_KEY            — free, from aistudio.google.com
-//   SUPABASE_SERVICE_ROLE_KEY
-//   NEXT_PUBLIC_SUPABASE_URL
-//
-// IMPORTANT: never enable billing on the Google Cloud project tied to this
-// key — the Gemini free tier disappears entirely the moment billing is
-// turned on for that project.
+// SERVER-ONLY. Procedurally generates themed content for Supabase content
+// tables using Google's free Gemini API. Only generates the content types
+// requested (count > 0), keeping prompts small enough to avoid MAX_TOKENS.
 
 import { supabaseAdmin } from './supabaseAdmin';
 
 export interface GenerateContentOptions {
-  /** Child's current adaptive skill ceiling (1–20), drives difficulty. */
   skillCeiling: number;
-  /** Real-world interests to theme content around, e.g. ['badminton','swimming']. */
   themes: string[];
   mode?: 'junior' | 'advanced';
-  mathCount?: number; // default 20
-  logicCount?: number; // default 20
-  flashcardCount?: number; // default 25
-  storyCount?: number; // default 3
+  mathCount?: number;
+  logicCount?: number;
+  flashcardCount?: number;
+  storyCount?: number;
 }
 
 export interface GenerateContentResult {
@@ -36,37 +21,6 @@ export interface GenerateContentResult {
   flashcardsInserted: number;
   storiesInserted: number;
   errors: string[];
-}
-
-interface RawMathProblem {
-  template: string;
-  variables: Record<string, { min: number; max: number }>;
-  answer_formula: string;
-  theme_tags: string[];
-}
-
-interface RawLogicPattern {
-  sequence: (number | string)[];
-  answer: number | string;
-  distractors: (number | string)[];
-  theme_tags: string[];
-}
-
-interface RawFlashcard {
-  deck: string;
-  concept: string;
-  detail: string;
-  emoji?: string;
-  theme_tags: string[];
-}
-
-interface RawStory {
-  title: string;
-  body: string;
-  mind_map_prompt: string;
-  comprehension_question: string;
-  answer_keywords: string[];
-  theme_tags: string[];
 }
 
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -80,149 +34,122 @@ function buildPrompt(opts: {
   flashcardCount: number;
   storyCount: number;
 }): string {
-  return `Generate children's educational content for an IGCSE-track learning app.
-Child's skill level: ${opts.skillCeiling} (1=baseline, higher=harder).
-Theme the content around these real-world interests where natural: ${opts.themes.join(', ') || 'general school life'}.
-Mode: ${opts.mode}.
+  const themeStr = opts.themes.join(', ') || 'general school life';
+  const sections: string[] = [];
+  const counts: string[] = [];
 
-Return EXACTLY this JSON shape and nothing else:
-
-{
-  "math_problems": [
+  if (opts.mathCount > 0) {
+    counts.push(`${opts.mathCount} math_problems`);
+    sections.push(`"math_problems": [
     {
-      "template": "string with {a} and {b} placeholders, themed, age-appropriate, one or two sentences",
+      "template": "word problem with {a} and {b} placeholders, themed around the interests, 1-2 sentences",
       "variables": { "a": { "min": number, "max": number }, "b": { "min": number, "max": number } },
-      "answer_formula": "simple arithmetic expression using a and b, e.g. \\"a*b\\" or \\"a+b\\"",
-      "theme_tags": ["lowercase-tag"]
+      "answer_formula": "arithmetic expression e.g. \\"a*b\\"",
+      "theme_tags": ["tag"]
     }
-  ],
-  "logic_patterns": [
+  ]`);
+  }
+
+  if (opts.logicCount > 0) {
+    counts.push(`${opts.logicCount} logic_patterns`);
+    sections.push(`"logic_patterns": [
     {
-      "sequence": [number_or_string, "..."],
-      "answer": number_or_string,
-      "distractors": [number_or_string, number_or_string, number_or_string],
-      "theme_tags": ["lowercase-tag"]
+      "sequence": [number, number, "?"],
+      "answer": number,
+      "distractors": [number, number, number],
+      "theme_tags": ["tag"]
     }
-  ],
-  "flashcards": [
+  ]`);
+  }
+
+  if (opts.flashcardCount > 0) {
+    counts.push(`${opts.flashcardCount} flashcards`);
+    sections.push(`"flashcards": [
     {
-      "deck": "one short lowercase category name, e.g. geography, science, multiplication, vocabulary",
-      "concept": "short prompt shown on the front of the card, a few words",
-      "detail": "the answer shown on the back, a few words",
-      "emoji": "one single emoji that visually represents the concept",
-      "theme_tags": ["lowercase-tag"]
+      "deck": "geography or science or multiplication or animals or space or vocabulary",
+      "concept": "short front-of-card prompt",
+      "detail": "short answer for back of card",
+      "emoji": "one emoji",
+      "theme_tags": ["tag"]
     }
-  ],
-  "stories": [
+  ]`);
+  }
+
+  if (opts.storyCount > 0) {
+    counts.push(`${opts.storyCount} stories`);
+    sections.push(`"stories": [
     {
-      "title": "short story title",
-      "body": "a simple, encouraging 80-150 word story appropriate for a 6-10 year old, optionally touching the themes",
-      "mind_map_prompt": "one sentence prompting the child to draw or map the core idea of the story",
-      "comprehension_question": "one simple spoken question about the story's content",
-      "answer_keywords": ["lowercase-keyword", "..."],
-      "theme_tags": ["lowercase-tag"]
+      "title": "story title",
+      "body": "60-100 word story for a 6-10 year old",
+      "mind_map_prompt": "one sentence prompting child to draw the core idea",
+      "comprehension_question": "one simple question about the story",
+      "answer_keywords": ["keyword"],
+      "theme_tags": ["tag"]
     }
-  ]
+  ]`);
+  }
+
+  return `Generate children's educational content. Skill level: ${opts.skillCeiling}/20. Theme: ${themeStr}. Mode: ${opts.mode}.
+
+Return ONLY this JSON, nothing else:
+{
+  ${sections.join(',\n  ')}
 }
 
-Generate exactly ${opts.mathCount} math_problems, ${opts.logicCount} logic_patterns, ${opts.flashcardCount} flashcards, and ${opts.storyCount} stories.
-CRITICAL VARIETY REQUIREMENT: every item within each category must use a genuinely different real-world scenario, setting, and sentence structure from every other item in that category — do not just swap numbers or names in the same sentence template. Spread flashcards across multiple decks (e.g. multiplication, geography, science, animals, space, vocabulary) rather than repeating one deck. Spread math problems across different operations (addition, subtraction, multiplication, division) and different everyday situations (shopping, sports, cooking, travel, school, nature).
-Keep all language simple, encouraging, and age-appropriate for 6-10 year olds. Never include violent, scary, sad, or adult themes. Stories must have a positive, gentle tone.`;
+Generate exactly ${counts.join(', ')}.
+Use varied scenarios and sentence structures. Age-appropriate for 6-10 year olds. Positive tone only.`;
 }
 
 function stripFences(text: string): string {
   return text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
 }
 
-function isValidMathProblem(p: any): p is RawMathProblem {
-  return (
-    p &&
-    typeof p.template === 'string' &&
-    p.template.length > 0 &&
-    typeof p.variables === 'object' &&
-    typeof p.answer_formula === 'string' &&
-    Array.isArray(p.theme_tags)
-  );
+function isValidMath(p: any) {
+  return p && typeof p.template === 'string' && p.template.length > 0 &&
+    typeof p.variables === 'object' && typeof p.answer_formula === 'string' &&
+    Array.isArray(p.theme_tags);
 }
 
-function isValidLogicPattern(p: any): p is RawLogicPattern {
-  return (
-    p &&
-    Array.isArray(p.sequence) &&
-    p.sequence.length > 0 &&
-    p.answer !== undefined &&
-    Array.isArray(p.distractors) &&
-    Array.isArray(p.theme_tags)
-  );
+function isValidLogic(p: any) {
+  return p && Array.isArray(p.sequence) && p.sequence.length > 0 &&
+    p.answer !== undefined && Array.isArray(p.distractors) && Array.isArray(p.theme_tags);
 }
 
-function isValidFlashcard(p: any): p is RawFlashcard {
-  return (
-    p &&
-    typeof p.deck === 'string' &&
-    p.deck.length > 0 &&
-    typeof p.concept === 'string' &&
-    p.concept.length > 0 &&
-    typeof p.detail === 'string' &&
-    Array.isArray(p.theme_tags)
-  );
+function isValidFlashcard(p: any) {
+  return p && typeof p.deck === 'string' && p.deck.length > 0 &&
+    typeof p.concept === 'string' && p.concept.length > 0 &&
+    typeof p.detail === 'string' && Array.isArray(p.theme_tags);
 }
 
-function isValidStory(p: any): p is RawStory {
-  return (
-    p &&
-    typeof p.title === 'string' &&
-    p.title.length > 0 &&
-    typeof p.body === 'string' &&
-    p.body.length > 20 &&
-    typeof p.comprehension_question === 'string' &&
-    Array.isArray(p.answer_keywords) &&
-    Array.isArray(p.theme_tags)
-  );
+function isValidStory(p: any) {
+  return p && typeof p.title === 'string' && typeof p.body === 'string' &&
+    p.body.length > 20 && typeof p.comprehension_question === 'string' &&
+    Array.isArray(p.answer_keywords) && Array.isArray(p.theme_tags);
 }
 
-/**
- * Calls the Gemini API (free tier) to procedurally generate themed content
- * across all four content tables, then writes valid rows into Supabase
- * (source: 'generated'). Never throws — problems are collected into
- * `errors` so one bad batch never crashes the route or blocks the others.
- */
 export async function generateThemedContent(
   opts: GenerateContentOptions,
 ): Promise<GenerateContentResult> {
   const errors: string[] = [];
   const result: GenerateContentResult = {
-    mathInserted: 0,
-    logicInserted: 0,
-    flashcardsInserted: 0,
-    storiesInserted: 0,
-    errors,
+    mathInserted: 0, logicInserted: 0, flashcardsInserted: 0, storiesInserted: 0, errors,
   };
 
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    errors.push('GEMINI_API_KEY is not set — skipping generation.');
-    return result;
-  }
-  if (!supabaseAdmin) {
-    errors.push('Supabase admin client unavailable — check SUPABASE_SERVICE_ROLE_KEY / NEXT_PUBLIC_SUPABASE_URL.');
-    return result;
-  }
+  if (!apiKey) { errors.push('GEMINI_API_KEY not set'); return result; }
+  if (!supabaseAdmin) { errors.push('Supabase admin unavailable'); return result; }
 
   const mode = opts.mode ?? 'advanced';
-  const mathCount = opts.mathCount ?? 20;
-  const logicCount = opts.logicCount ?? 20;
-  const flashcardCount = opts.flashcardCount ?? 25;
-  const storyCount = opts.storyCount ?? 3;
+  const mathCount = opts.mathCount ?? 8;
+  const logicCount = opts.logicCount ?? 8;
+  const flashcardCount = opts.flashcardCount ?? 10;
+  const storyCount = opts.storyCount ?? 2;
   const skillCeiling = Math.min(20, Math.max(1, Math.round(opts.skillCeiling)));
 
-  let raw: {
-    math_problems?: unknown[];
-    logic_patterns?: unknown[];
-    flashcards?: unknown[];
-    stories?: unknown[];
-  };
+  // Skip entirely if nothing requested
+  if (mathCount + logicCount + flashcardCount + storyCount === 0) return result;
 
+  let raw: any;
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
@@ -230,137 +157,92 @@ export async function generateThemedContent(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text: buildPrompt({
-                    skillCeiling,
-                    themes: opts.themes,
-                    mode,
-                    mathCount,
-                    logicCount,
-                    flashcardCount,
-                    storyCount,
-                  }),
-                },
-              ],
-            },
-          ],
+          contents: [{
+            role: 'user',
+            parts: [{ text: buildPrompt({ skillCeiling, themes: opts.themes, mode, mathCount, logicCount, flashcardCount, storyCount }) }],
+          }],
           generationConfig: {
             responseMimeType: 'application/json',
-            temperature: 0.95,
-            maxOutputTokens: 8192,
+            temperature: 0.9,
+            maxOutputTokens: 4096,
           },
         }),
       },
     );
 
-    if (!res.ok) {
-      errors.push(`Gemini API returned ${res.status}: ${await res.text()}`);
-      return result;
-    }
+    if (!res.ok) { errors.push(`Gemini ${res.status}: ${await res.text()}`); return result; }
 
     const data = await res.json();
     const candidate = data?.candidates?.[0];
-
-    if (!candidate) {
-      errors.push('Gemini API returned no candidates (likely blocked by safety filters).');
-      return result;
-    }
+    if (!candidate) { errors.push('No candidates returned'); return result; }
     if (candidate.finishReason && candidate.finishReason !== 'STOP') {
       errors.push(`Gemini stopped early: ${candidate.finishReason}`);
+      // Don't return — try to parse whatever we got
     }
 
-    const text: string | undefined = candidate?.content?.parts?.[0]?.text;
-    if (!text) {
-      errors.push('Gemini API response had no text content.');
-      return result;
-    }
-
+    const text: string = candidate?.content?.parts?.[0]?.text ?? '';
+    if (!text) { errors.push('No text in response'); return result; }
     raw = JSON.parse(stripFences(text));
   } catch (e) {
-    errors.push(`Generation/parsing failed: ${e instanceof Error ? e.message : String(e)}`);
+    errors.push(`Parse failed: ${e instanceof Error ? e.message : String(e)}`);
     return result;
   }
 
-  // --- math_problem_templates ------------------------------------------
-  const mathRows = (raw.math_problems ?? [])
-    .filter(isValidMathProblem)
-    .map((p) => ({
-      topic: 'olympiad',
-      mode,
-      skill_level: skillCeiling,
-      template: p.template,
-      variables: p.variables,
-      answer_formula: p.answer_formula,
-      theme_tags: p.theme_tags,
-      source: 'generated' as const,
+  // Insert math
+  if (mathCount > 0) {
+    const rows = (raw.math_problems ?? []).filter(isValidMath).map((p: any) => ({
+      topic: 'olympiad', mode, skill_level: skillCeiling,
+      template: p.template, variables: p.variables,
+      answer_formula: p.answer_formula, theme_tags: p.theme_tags, source: 'generated',
     }));
-  if (mathRows.length) {
-    const { error, count } = await supabaseAdmin.from('math_problem_templates').insert(mathRows, { count: 'exact' });
-    if (error) errors.push(`math insert failed: ${error.message}`);
-    else result.mathInserted = count ?? mathRows.length;
+    if (rows.length) {
+      const { error, count } = await supabaseAdmin.from('math_problem_templates').insert(rows, { count: 'exact' });
+      if (error) errors.push(`math insert: ${error.message}`);
+      else result.mathInserted = count ?? rows.length;
+    }
   }
 
-  // --- logic_patterns ----------------------------------------------------
-  const logicRows = (raw.logic_patterns ?? [])
-    .filter(isValidLogicPattern)
-    .map((p) => ({
-      pattern_type: 'olympiad',
-      mode,
-      skill_level: skillCeiling,
-      sequence: p.sequence,
-      answer: p.answer,
-      distractors: p.distractors,
-      theme_tags: p.theme_tags,
-      source: 'generated' as const,
+  // Insert logic
+  if (logicCount > 0) {
+    const rows = (raw.logic_patterns ?? []).filter(isValidLogic).map((p: any) => ({
+      pattern_type: 'olympiad', mode, skill_level: skillCeiling,
+      sequence: p.sequence, answer: p.answer,
+      distractors: p.distractors, theme_tags: p.theme_tags, source: 'generated',
     }));
-  if (logicRows.length) {
-    const { error, count } = await supabaseAdmin.from('logic_patterns').insert(logicRows, { count: 'exact' });
-    if (error) errors.push(`logic insert failed: ${error.message}`);
-    else result.logicInserted = count ?? logicRows.length;
+    if (rows.length) {
+      const { error, count } = await supabaseAdmin.from('logic_patterns').insert(rows, { count: 'exact' });
+      if (error) errors.push(`logic insert: ${error.message}`);
+      else result.logicInserted = count ?? rows.length;
+    }
   }
 
-  // --- flashcards ----------------------------------------------------------
-  const flashcardRows = (raw.flashcards ?? [])
-    .filter(isValidFlashcard)
-    .map((p) => ({
-      deck: p.deck,
-      mode,
-      skill_level: skillCeiling,
-      concept: p.concept,
-      detail: p.detail,
-      emoji: p.emoji ?? null,
-      theme_tags: p.theme_tags,
-      source: 'generated' as const,
+  // Insert flashcards
+  if (flashcardCount > 0) {
+    const rows = (raw.flashcards ?? []).filter(isValidFlashcard).map((p: any) => ({
+      deck: p.deck, mode, skill_level: skillCeiling,
+      concept: p.concept, detail: p.detail,
+      emoji: p.emoji ?? null, theme_tags: p.theme_tags, source: 'generated',
     }));
-  if (flashcardRows.length) {
-    const { error, count } = await supabaseAdmin.from('flashcards').insert(flashcardRows, { count: 'exact' });
-    if (error) errors.push(`flashcards insert failed: ${error.message}`);
-    else result.flashcardsInserted = count ?? flashcardRows.length;
+    if (rows.length) {
+      const { error, count } = await supabaseAdmin.from('flashcards').insert(rows, { count: 'exact' });
+      if (error) errors.push(`flashcards insert: ${error.message}`);
+      else result.flashcardsInserted = count ?? rows.length;
+    }
   }
 
-  // --- educational_stories -------------------------------------------------
-  const storyRows = (raw.stories ?? [])
-    .filter(isValidStory)
-    .map((p) => ({
-      title: p.title,
-      language: 'en' as const,
-      mode,
-      skill_level: skillCeiling,
-      body: p.body,
-      mind_map_prompt: p.mind_map_prompt ?? null,
+  // Insert stories
+  if (storyCount > 0) {
+    const rows = (raw.stories ?? []).filter(isValidStory).map((p: any) => ({
+      title: p.title, language: 'en', mode, skill_level: skillCeiling,
+      body: p.body, mind_map_prompt: p.mind_map_prompt ?? null,
       comprehension_question: p.comprehension_question,
-      answer_keywords: p.answer_keywords,
-      theme_tags: p.theme_tags,
-      source: 'generated' as const,
+      answer_keywords: p.answer_keywords, theme_tags: p.theme_tags, source: 'generated',
     }));
-  if (storyRows.length) {
-    const { error, count } = await supabaseAdmin.from('educational_stories').insert(storyRows, { count: 'exact' });
-    if (error) errors.push(`stories insert failed: ${error.message}`);
-    else result.storiesInserted = count ?? storyRows.length;
+    if (rows.length) {
+      const { error, count } = await supabaseAdmin.from('educational_stories').insert(rows, { count: 'exact' });
+      if (error) errors.push(`stories insert: ${error.message}`);
+      else result.storiesInserted = count ?? rows.length;
+    }
   }
 
   return result;
