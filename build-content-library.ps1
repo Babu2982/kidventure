@@ -5,7 +5,7 @@
 #
 # USAGE: edit $secret below, then run:  .\build-content-library.ps1
 
-$secret = "PASTE_YOUR_CONTENT_ADMIN_SECRET_HERE"
+$secret = "kidventure2026"
 $url = "https://kidsventure.vercel.app/api/content/generate"
 
 $batches = @(
