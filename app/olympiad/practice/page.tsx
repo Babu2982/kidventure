@@ -17,6 +17,7 @@ import type { SMCQuestion } from '@/lib/smc/questions-g1';
 import { isCorrect } from '@/lib/smc/scoring';
 import DrawingCanvas from '@/components/olympiad/DrawingCanvas';
 import QuestionVisual from '@/components/olympiad/QuestionVisual';
+import { VISUAL_QUESTION_IDS } from '@/components/olympiad/QuestionVisual';
 import { playTap, playSuccess } from '@/lib/sounds';
 
 let _CapApp: any = null;
@@ -31,7 +32,8 @@ type FilterMode =
   | '2025'
   | '2023'
   | 'hard'
-  | 'topic';
+  | 'topic'
+  | 'pictures';
 
 const TOPIC_LABELS: Record<string, string> = {
   'place-value': '🔢 Place Value',
@@ -96,6 +98,7 @@ function PracticeMode() {
     else if (f === '2023') q = ALL_QUESTIONS_G1.filter((x) => x.year === 2023);
     else if (f === 'hard') q = ALL_BANK.filter((x) => x.difficulty === 3);
     else if (f === 'topic') q = BANK_BY_TOPIC[topic] ?? [];
+    else if (f === 'pictures') q = ALL_BANK.filter((x) => VISUAL_QUESTION_IDS.has(x.id));
     else q = ALL_BANK; // 'all'
     return [...q].sort(() => Math.random() - 0.5);
   }
@@ -186,6 +189,21 @@ function PracticeMode() {
               </motion.button>
             ))}
           </div>
+
+          {/* Picture Questions — full width highlight tile */}
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => { playTap(soundOn); start('pictures'); }}
+            className="w-full max-w-sm bg-amber-400 rounded-[2rem] shadow-chunky py-4 px-6 flex items-center gap-4 text-white"
+          >
+            <span className="text-4xl">🖼️</span>
+            <div className="text-left">
+              <p className="font-display text-lg">Picture Questions</p>
+              <p className="font-body text-sm text-amber-100">
+                All {VISUAL_QUESTION_IDS.size} questions with diagrams, clocks &amp; charts
+              </p>
+            </div>
+          </motion.button>
 
           {/* Topic picker */}
           <motion.button

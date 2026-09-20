@@ -610,6 +610,16 @@ const VISUALS: Record<string, React.ReactNode> = {
 
 // ─── PUBLIC COMPONENT ──────────────────────────────────────────────────────────
 
+// ─── PUBLIC EXPORTS ───────────────────────────────────────────────────────────
+
+/** Set of question IDs that have a visual diagram.
+ *  Used by the practice page to build the "Picture Questions" pool. */
+export const VISUAL_QUESTION_IDS: Set<string> = new Set(
+  Object.entries(VISUALS)
+    .filter(([, v]) => v !== null)
+    .map(([id]) => id)
+);
+
 export default function QuestionVisual({ questionId }: { questionId: string }) {
   const visual = VISUALS[questionId];
   if (!visual) return null;
