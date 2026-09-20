@@ -26,10 +26,6 @@ function CapApp() {
   return _CapApp;
 }
 
-function say(text: string) {
-  try { void narrate(text); } catch { /* best-effort */ }
-}
-
 type FilterMode =
   | 'all'
   | '2025'
@@ -59,6 +55,8 @@ export default function PracticePage() {
 function PracticeMode() {
   const router = useRouter();
   const soundOn = useAppStore((s) => s.soundOn);
+  const narrationOn = useAppStore((s) => s.narrationOn);
+  const toggleNarration = useAppStore((s) => s.toggleNarration);
 
   const [filter, setFilter] = useState<FilterMode>('all');
   const [selectedTopic, setSelectedTopic] = useState('');
@@ -86,6 +84,12 @@ function PracticeMode() {
 
   const ALL_BANK = [...ALL_QUESTIONS_G1, ...BANK_QUESTIONS];
 
+  // narrate only when voice is on
+  function say(text: string) {
+    if (!narrationOn) return;
+    try { void narrate(text); } catch { /* best-effort */ }
+  }
+
   function buildPool(f: FilterMode, topic = ''): SMCQuestion[] {
     let q: SMCQuestion[] = [];
     if (f === '2025') q = ALL_QUESTIONS_G1.filter((x) => x.year === 2025);
@@ -112,9 +116,14 @@ function PracticeMode() {
 
   const current = pool[index];
 
+  // Speak the question stem whenever the card changes and voice is on.
+  // Keyed on current.id so it fires once per new question, not on every render.
   useEffect(() => {
-    if (current && !submitted) say(current.stem);
-  }, [current, submitted]);
+    if (!current || submitted || !narrationOn) return;
+    const t = setTimeout(() => say(current.stem), 120); // small delay avoids overlap
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id, submitted, narrationOn]);
 
   function submit() {
     if (!current || submitted || !answer.trim()) return;
@@ -261,6 +270,22 @@ function PracticeMode() {
           <div className="h-full rounded-full bg-yellow-300 transition-[width] duration-300" style={{ width: `${(index / pool.length) * 100}%` }} />
         </div>
         <span className="text-sm font-bold text-white/90">{index + 1}/{pool.length}</span>
+        {/* Voice toggle */}
+        <button
+          onClick={() => {
+            toggleNarration();
+            // if turning ON right now, speak the current question immediately
+            if (!narrationOn && current && !submitted) {
+              setTimeout(() => { try { void narrate(current.stem); } catch {} }, 80);
+            }
+          }}
+          aria-label={narrationOn ? 'Turn off voice' : 'Turn on voice'}
+          className={`grid h-11 w-11 place-items-center rounded-full text-xl transition active:scale-95 ${
+            narrationOn ? 'bg-white/30 text-white' : 'bg-white/10 text-white/40'
+          }`}
+        >
+          {narrationOn ? '🔊' : '🔇'}
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-6 flex flex-col gap-4">
