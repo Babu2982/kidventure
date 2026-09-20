@@ -16,6 +16,7 @@ import { BANK_QUESTIONS, BANK_BY_TOPIC, BANK_TOPICS } from '@/lib/smc/bank/index
 import type { SMCQuestion } from '@/lib/smc/questions-g1';
 import { isCorrect } from '@/lib/smc/scoring';
 import DrawingCanvas from '@/components/olympiad/DrawingCanvas';
+import QuestionVisual from '@/components/olympiad/QuestionVisual';
 import { playTap, playSuccess } from '@/lib/sounds';
 
 let _CapApp: any = null;
@@ -279,6 +280,9 @@ function PracticeMode() {
             </div>
 
             <p className="font-body text-slate-800 text-lg leading-relaxed mb-4">{current?.stem}</p>
+
+            {/* Visual diagram (SVG) — only renders when a visual exists for this question */}
+            {current && <QuestionVisual questionId={current.id} />}
 
             {/* MCQ */}
             {current?.type === 'mcq' && current.options && (
