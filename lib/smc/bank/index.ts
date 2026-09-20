@@ -3,7 +3,8 @@
 // to the full SMCQuestion format the practice screen expects.
 // Total: 540 bank questions + 71 official paper questions = 611 questions.
 
-import type { SMCQuestion, SectionId } from '../spec';
+import type { SMCQuestion } from '../questions-g1';
+import type { SectionId } from '../spec';
 import type { BankQuestion } from './types';
 import { BATCH1 } from './batch1';
 import { BATCH2 } from './batch2';
