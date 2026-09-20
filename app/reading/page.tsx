@@ -8,9 +8,8 @@ import { ClientGate, TopBar } from "@/components/ui";
 import { RewardOverlay } from "@/components/RewardOverlay";
 import { useAppStore, useLearningMode, type Sticker } from "@/store/useAppStore";
 import { playSuccess, playRetry, playTap } from "@/lib/sounds";
-import { StoryReader, TamilSpeaker } from "@/components/StoryAndTamil";
+import { StoryReader, TamilSpeaker, PhasedLanguageReader } from "@/components/StoryAndTamil";
 import { useAutoNarrate, narrateMistake, MODULE_INTROS } from "@/lib/narrator";
-import { LetterTracer } from "@/components/LetterTracer";
 
 /**
  * Letter Match: drag each lowercase letter onto its uppercase partner.
@@ -94,8 +93,8 @@ function AdvancedReading() {
       </nav>
       <div className="flex-1 flex flex-col items-center justify-start pt-4 px-4 pb-8 overflow-y-auto">
         {tab === "english" && <StoryReader />}
-        {tab === "hindi" && <LetterTracer language="hindi" key="hi" />}
-        {tab === "kannada" && <LetterTracer language="kannada" key="kn" />}
+        {tab === "hindi" && <PhasedLanguageReader language="hindi" key="hi" />}
+        {tab === "kannada" && <PhasedLanguageReader language="kannada" key="kn" />}
         {tab === "tamil" && <TamilSpeaker />}
       </div>
     </main>
