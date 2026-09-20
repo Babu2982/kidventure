@@ -32,6 +32,8 @@ import { narrate } from "@/lib/narrator";
 import { RewardOverlay } from "@/components/RewardOverlay";
 import { GuidedTracer } from "@/components/GuidedTracer";
 import { hasStrokeData } from "@/lib/strokes";
+import { TamilTracer } from "@/components/TamilTracer";
+import { getTamilLetter } from "@/lib/tamilLetters";
 import { useRouter } from "next/navigation";
 
 /* ─────────────────────────────────────────────────────────────
@@ -289,7 +291,7 @@ const TAMIL_STORIES: Story[] = [
         answer: 1,
       },
     ],
-    traceLetters: [],   // Tamil stroke data not yet authored → Phase 5 shows placeholder
+    traceLetters: ["அ", "க"],   // Tamil — uses TamilTracer (SVG dashoffset)
     summaryKeywords: ["காக்கை", "தண்ணீர்", "குடம்", "கற்கள்", "தாகம்"],
   },
   {
@@ -310,7 +312,7 @@ const TAMIL_STORIES: Story[] = [
         answer: 1,
       },
     ],
-    traceLetters: [],
+    traceLetters: ["இ", "உ"],
     summaryKeywords: ["முயல்", "ஆமை", "பந்தயம்", "வெற்றி", "தூங்கியது"],
   },
   {
@@ -331,7 +333,7 @@ const TAMIL_STORIES: Story[] = [
         answer: 1,
       },
     ],
-    traceLetters: [],
+    traceLetters: ["எ", "ஒ"],
     summaryKeywords: ["மழை", "மேகம்", "மின்னல்", "வானவில்", "குழந்தைகள்", "மகிழ்ந்தனர்"],
   },
 ];
@@ -572,6 +574,12 @@ function Phase4Comprehension({
    PHASE 5 — STROKE TRACING
 ───────────────────────────────────────────────────────────── */
 
+/** Detects Tamil script Unicode block U+0B80–U+0BFF */
+function isTamilLetter(letter: string): boolean {
+  const code = letter.codePointAt(0) ?? 0;
+  return code >= 0x0B80 && code <= 0x0BFF;
+}
+
 function Phase5Tracing({
   traceLetters,
   onComplete,
@@ -579,11 +587,13 @@ function Phase5Tracing({
   traceLetters: string[];
   onComplete: () => void;
 }) {
-  // Filter to only letters that actually have stroke data
-  const available = traceLetters.filter(hasStrokeData);
   const [idx, setIdx] = useState(0);
 
-  // No stroke data available for this language yet
+  // Route: Tamil letters → TamilTracer; Hindi/Kannada → GuidedTracer
+  const available = traceLetters.filter((l) =>
+    isTamilLetter(l) ? !!getTamilLetter(l) : hasStrokeData(l)
+  );
+
   if (available.length === 0) {
     return (
       <motion.div
@@ -609,6 +619,7 @@ function Phase5Tracing({
   }
 
   const letter = available[idx];
+  const tamilData = isTamilLetter(letter) ? getTamilLetter(letter) : null;
 
   const handleComplete = () => {
     if (idx + 1 < available.length) {
@@ -631,11 +642,22 @@ function Phase5Tracing({
           Letter {idx + 1} of {available.length}: <strong>{letter}</strong>
         </span>
       </p>
-      <GuidedTracer
-        key={letter}
-        letter={letter}
-        onComplete={handleComplete}
-      />
+
+      {tamilData ? (
+        /* Tamil — SVG dashoffset path-reveal tracer */
+        <TamilTracer
+          key={letter}
+          letter={tamilData}
+          onComplete={handleComplete}
+        />
+      ) : (
+        /* Hindi / Kannada — canvas waypoint tracer */
+        <GuidedTracer
+          key={letter}
+          letter={letter}
+          onComplete={handleComplete}
+        />
+      )}
     </motion.div>
   );
 }
